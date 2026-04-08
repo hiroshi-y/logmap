@@ -1,0 +1,40 @@
+{
+  "app_title": "LogMap - Amateur Radio Dashboard",
+  "clock": {
+    "local_time": "Local Time",
+    "utc_time": "UTC"
+  },
+  "stats": {
+    "title": "Statistics",
+    "total_qsos": "Total QSOs",
+    "farthest_call": "Farthest Station",
+    "farthest_location": "Farthest Location",
+    "farthest_distance": "Farthest Distance"
+  },
+  "map": {
+    "reset_zoom": "Reset Zoom",
+    "zoom_in": "Zoom In",
+    "zoom_out": "Zoom Out"
+  },
+  "mini_panel": {
+    "callsign": "Callsign",
+    "location": "Location",
+    "distance": "Distance",
+    "band": "Band"
+  },
+  "units": {
+    "km": "km"
+  },
+  "status": {
+    "connecting": "Connecting...",
+    "connected": "Connected",
+    "disconnected": "Disconnected",
+    "monitoring": "Monitoring Log",
+    "waiting": "Waiting for QSO"
+  },
+  "language": {
+    "label": "Language",
+    "ja": "日本語",
+    "en": "English"
+  }
+}

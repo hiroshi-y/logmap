@@ -1,0 +1,40 @@
+{
+  "app_title": "LogMap - アマチュア無線ダッシュボード",
+  "clock": {
+    "local_time": "ローカル時刻",
+    "utc_time": "UTC"
+  },
+  "stats": {
+    "title": "統計情報",
+    "total_qsos": "総交信局数",
+    "farthest_call": "最遠局",
+    "farthest_location": "最遠局の位置",
+    "farthest_distance": "最遠距離"
+  },
+  "map": {
+    "reset_zoom": "ズームリセット",
+    "zoom_in": "ズームイン",
+    "zoom_out": "ズームアウト"
+  },
+  "mini_panel": {
+    "callsign": "コールサイン",
+    "location": "位置",
+    "distance": "距離",
+    "band": "バンド"
+  },
+  "units": {
+    "km": "km"
+  },
+  "status": {
+    "connecting": "接続中...",
+    "connected": "接続済み",
+    "disconnected": "切断",
+    "monitoring": "ログ監視中",
+    "waiting": "交信待機中"
+  },
+  "language": {
+    "label": "言語",
+    "ja": "日本語",
+    "en": "English"
+  }
+}

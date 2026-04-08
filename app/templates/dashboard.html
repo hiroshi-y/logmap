@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ translations.app_title }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+</head>
+<body>
+    <!-- Clock display -->
+    <div id="clock-panel">
+        <div id="clock-local">
+            <span class="clock-label" data-i18n="clock.local_time">{{ translations.clock.local_time }}</span>
+            <span id="clock-local-time" class="clock-time">--:--:--</span>
+        </div>
+        <div id="clock-utc">
+            <span class="clock-label" data-i18n="clock.utc_time">{{ translations.clock.utc_time }}</span>
+            <span id="clock-utc-time" class="clock-time">--:--:--</span>
+        </div>
+    </div>
+
+    <!-- Status bar -->
+    <div id="status-bar">
+        <span id="status-text" data-i18n="status.connecting">{{ translations.status.connecting }}</span>
+        <div id="language-switcher">
+            <button class="lang-btn {% if lang == 'ja' %}active{% endif %}" data-lang="ja">日本語</button>
+            <button class="lang-btn {% if lang == 'en' %}active{% endif %}" data-lang="en">EN</button>
+        </div>
+    </div>
+
+    <!-- Map container -->
+    <div id="map-container">
+        <div id="map"></div>
+
+        <!-- Statistics overlay -->
+        <div id="stats-panel">
+            <div class="stats-title" data-i18n="stats.title">{{ translations.stats.title }}</div>
+            <div class="stats-row">
+                <span class="stats-label" data-i18n="stats.total_qsos">{{ translations.stats.total_qsos }}</span>
+                <span id="stats-total" class="stats-value">0</span>
+            </div>
+            <div class="stats-row">
+                <span class="stats-label" data-i18n="stats.farthest_call">{{ translations.stats.farthest_call }}</span>
+                <span id="stats-farthest-call" class="stats-value">-</span>
+            </div>
+            <div class="stats-row">
+                <span class="stats-label" data-i18n="stats.farthest_location">{{ translations.stats.farthest_location }}</span>
+                <span id="stats-farthest-location" class="stats-value">-</span>
+            </div>
+            <div class="stats-row">
+                <span class="stats-label" data-i18n="stats.farthest_distance">{{ translations.stats.farthest_distance }}</span>
+                <span id="stats-farthest-distance" class="stats-value">- km</span>
+            </div>
+        </div>
+
+        <!-- Map controls -->
+        <div id="map-controls">
+            <button id="btn-zoom-in" title="Zoom In">+</button>
+            <button id="btn-zoom-out" title="Zoom Out">−</button>
+            <button id="btn-reset-zoom" data-i18n-title="map.reset_zoom" title="{{ translations.map.reset_zoom }}">⟲</button>
+        </div>
+    </div>
+
+    <!-- Configuration passed from server -->
+    <script>
+        const LOGMAP_CONFIG = {
+            stationLat: {{ station_lat }},
+            stationLon: {{ station_lon }},
+            stationCall: "{{ station_call }}",
+            lang: "{{ lang }}",
+            translations: {{ translations | tojson }},
+            maxMiniPanels: 20,
+        };
+    </script>
+
+    <!-- Google Maps API -->
+    <script src="https://maps.googleapis.com/maps/api/js?key={{ google_api_key }}&callback=initMap" async defer></script>
+
+    <!-- Socket.IO -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+
+    <!-- Dashboard JS -->
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>

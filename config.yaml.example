@@ -1,0 +1,50 @@
+# LogMap Configuration Example
+# Copy this file to config.yaml and edit with your settings.
+# All external service access settings are consolidated here.
+
+# Google Maps API
+google_maps:
+  api_key: "YOUR_GOOGLE_MAPS_API_KEY"
+
+# Operator station location (your QTH)
+station:
+  callsign: "JH1ABC"
+  latitude: 35.6812
+  longitude: 139.7671
+  grid_square: "PM95ss"
+
+# Turbo HAMLOG settings
+hamlog:
+  # Path to the Turbo HAMLOG data directory
+  data_dir: "C:\\Hamlog\\Data"
+  # Main database file name
+  db_file: "Hamlog50.hdb"
+  # Polling interval in seconds
+  poll_interval: 3
+
+# cty.dat settings
+cty_dat:
+  # Path to cty.dat file
+  file_path: "data/cty.dat"
+  # Download URL for cty.dat updates
+  download_url: "https://www.country-files.com/bigcty/cty.dat"
+
+# JCC code data
+jcc:
+  file_path: "data/jcc_codes.json"
+
+# Dashboard settings
+dashboard:
+  # Maximum number of mini-panels before converting to dots
+  max_mini_panels: 20
+  # Language: "ja" or "en"
+  language: "ja"
+  # Web server port
+  port: 5000
+  # Web server host
+  host: "0.0.0.0"
+
+# Logging
+logging:
+  level: "INFO"
+  file: "logmap.log"
