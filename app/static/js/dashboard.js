@@ -329,8 +329,16 @@ function addQsoToMap(qso, isActive, showCard) {
             _pendingDomready--;
             if (_pendingDomready === 0) {
                 setTimeout(() => {
-                    const active = qsoEntries.find(e => e.isActive);
-                    if (active) bringToFront(active);
+                    // Simulate clicking a blue card: this sets the blue
+                    // card's z-index (overriding Google's value) AND then
+                    // raises the active card above it.
+                    const anyPast = qsoEntries.find(e => !e.isActive && e._iwL6 && e._infoOpen);
+                    if (anyPast) {
+                        bringToFront(anyPast);
+                    } else {
+                        const active = qsoEntries.find(e => e.isActive && e._iwL6);
+                        if (active) bringToFront(active);
+                    }
                 }, 0);
             }
         }
