@@ -55,6 +55,7 @@ function handleMidnightRollover() {
             qsoEntries.splice(i, 1);
         }
     }
+    updateFarthestLines();
 }
 
 
@@ -109,9 +110,6 @@ function initMap() {
     });
     document.getElementById('btn-reset-zoom').addEventListener('click', resetZoom);
 
-    // ---- DEBUG: two test pins with z-order display ----
-    addDebugPins();
-
     // Initialize SocketIO after map is ready
     initSocketIO();
 
@@ -124,109 +122,61 @@ function initMap() {
 /* ===== InfoWindow z-order control ===== */
 // Google Maps InfoWindow DOM structure (confirmed via debug):
 //   L5: .gm-style-iw-a  (position: absolute)
-//   L6: div              (position: absolute, zIndex: -29 etc.) <-- THIS controls stacking
-//   L7: div              (position: absolute, zIndex: 107)      <-- shared pane for all IWs
-//
+//   L6: div              (position: absolute, zIndex controls stacking)
+//   L7: div              (position: absolute, zIndex: 107, shared pane)
 // To bring an InfoWindow to front, set L6's zIndex to a high value.
-// L6 = .gm-style-iw-a's parentElement.
+// L6 = .gm-style-iw-a.parentElement
 
 let nextIwZIndex = 10000;
-
-function getIwContainer(infoWindow) {
-    // Find .gm-style-iw-a that belongs to this InfoWindow by searching
-    // all such elements for one that contains the InfoWindow's content.
-    const candidates = document.querySelectorAll('.gm-style-iw-a');
-    // The last one added is most likely ours, but we search to be safe
-    for (const el of candidates) {
-        // L6 is el.parentElement
-        if (el.parentElement) return el.parentElement;
-    }
-    return null;
-}
-
-function cacheIwContainer(entry) {
-    // Called on domready: find and cache this entry's L6 container.
-    // We identify it by looking for the one with matching content text.
-    const callsign = entry.qso ? entry.qso.callsign : '';
-    const candidates = document.querySelectorAll('.gm-style-iw-a');
-    for (const el of candidates) {
-        if (callsign && el.textContent.includes(callsign)) {
-            entry._iwL6 = el.parentElement;
-            return;
-        }
-    }
-}
 
 function bringToFront(entry) {
     if (entry._iwL6) {
         entry._iwL6.style.zIndex = String(++nextIwZIndex);
     }
+    // Active (yellow) card always stays on top
+    if (!entry.isActive) {
+        ensureActiveOnTop();
+    }
+}
+
+function ensureActiveOnTop() {
+    const active = qsoEntries.find(e => e.isActive && e._iwL6);
+    if (active) {
+        active._iwL6.style.zIndex = String(++nextIwZIndex);
+    }
 }
 
 
-/* ===== Debug Pins ===== */
-function addDebugPins() {
-    const pins = [
-        { id: 'dbgA', label: 'A', color: '#ff00ff', dLat: 0.15, dLng: 0.15 },
-        { id: 'dbgB', label: 'B', color: '#00ffff', dLat: 0.17, dLng: 0.17 },
-    ];
-    pins.forEach(p => {
-        const pos = {
-            lat: LOGMAP_CONFIG.stationLat + p.dLat,
-            lng: LOGMAP_CONFIG.stationLon + p.dLng,
-        };
-        const marker = new google.maps.Marker({
-            position: pos, map: map,
-            icon: { path: google.maps.SymbolPath.CIRCLE, scale: 10,
-                    fillColor: p.color, fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 },
-            zIndex: 500,
+/* ===== Great Circle Lines to Top-3 Farthest ===== */
+const farthestLines = [];  // Array of google.maps.Polyline
+const FARTHEST_COLORS = ['#ff4444', '#ff8800', '#ffcc00']; // 1st, 2nd, 3rd
+
+function updateFarthestLines() {
+    // Remove old lines
+    farthestLines.forEach(line => line.setMap(null));
+    farthestLines.length = 0;
+
+    if (!map) return;
+
+    const stationPos = { lat: LOGMAP_CONFIG.stationLat, lng: LOGMAP_CONFIG.stationLon };
+
+    // Top 3 farthest QSOs by distance
+    const sorted = qsoEntries
+        .filter(e => e.qso.distance_km > 0)
+        .sort((a, b) => b.qso.distance_km - a.qso.distance_km)
+        .slice(0, 3);
+
+    sorted.forEach((entry, i) => {
+        const line = new google.maps.Polyline({
+            path: [stationPos, entry.marker.getPosition()],
+            geodesic: true,
+            strokeColor: FARTHEST_COLORS[i],
+            strokeOpacity: 0.7,
+            strokeWeight: i === 0 ? 3 : 2,
+            map: map,
+            zIndex: 10,
         });
-        let iwL6 = null;
-
-        function makeContent(z) {
-            return (
-                `<div id="${p.id}" style="background:${p.color};color:#fff;padding:12px;border-radius:6px;font-size:16px;cursor:pointer;min-width:150px;">` +
-                `<b>デバッグ ${p.label}</b><br>` +
-                `L6 z-index: <b>${z}</b><br>` +
-                `<small>カードをクリック → z-order UP</small></div>`
-            );
-        }
-
-        const iw = new google.maps.InfoWindow({
-            content: makeContent('(init)'),
-            disableAutoPan: true,
-        });
-
-        google.maps.event.addListener(iw, 'domready', () => {
-            // Cache L6: walk up from .gm-style-iw-a
-            if (!iwL6) {
-                const all = document.querySelectorAll('.gm-style-iw-a');
-                for (const el of all) {
-                    if (el.textContent.includes('デバッグ ' + p.label)) {
-                        iwL6 = el.parentElement;
-                        break;
-                    }
-                }
-            }
-            // Update displayed z-index
-            const zDisplay = iwL6 ? iwL6.style.zIndex : '(not cached)';
-            const el = document.getElementById(p.id);
-            if (el) {
-                el.querySelector('b:last-of-type').textContent = zDisplay;
-                el.onclick = () => {
-                    if (iwL6) {
-                        iwL6.style.zIndex = String(++nextIwZIndex);
-                        console.log(`${p.label}: set L6 zIndex to ${nextIwZIndex}, was ${zDisplay}`);
-                        el.querySelector('b:last-of-type').textContent = String(nextIwZIndex);
-                    } else {
-                        console.log(`${p.label}: iwL6 is null!`);
-                    }
-                };
-            }
-        });
-
-        marker.addListener('click', () => { iw.open(map, marker); });
-        iw.open(map, marker);
+        farthestLines.push(line);
     });
 }
 
@@ -263,10 +213,14 @@ function initSocketIO() {
 
     socket.on('initial_qsos', (qsos) => {
         clearAllMarkers();
+        const openCount = LOGMAP_CONFIG.openCards || 1;
+        const openStart = Math.max(0, qsos.length - openCount);
         qsos.forEach((qso, index) => {
             const isLatest = (index === qsos.length - 1);
-            addQsoToMap(qso, isLatest);
+            const showCard = (index >= openStart);
+            addQsoToMap(qso, isLatest, showCard);
         });
+        updateFarthestLines();
         resetZoom();
         setStatus('status.monitoring');
     });
@@ -275,6 +229,7 @@ function initSocketIO() {
         shrinkActivePanels();
         addQsoToMap(qso, true);
         enforceMaxPanels();
+        updateFarthestLines();
         resetZoom();
     });
 
@@ -304,8 +259,14 @@ function jitterPosition(lat, lng) {
     return { lat: lat + dist * Math.sin(angle), lng: lng + dist * Math.cos(angle) };
 }
 
-function addQsoToMap(qso, isActive) {
+let panelIdCounter = 0;
+
+function addQsoToMap(qso, isActive, showCard) {
+    // showCard: whether to open the InfoWindow (defaults to isActive)
+    if (showCard === undefined) showCard = isActive;
+
     const position = jitterPosition(qso.latitude, qso.longitude);
+    const panelId = 'qso-panel-' + (++panelIdCounter);
 
     // Create marker
     const marker = new google.maps.Marker({
@@ -320,7 +281,7 @@ function addQsoToMap(qso, isActive) {
     }
 
     // Create info window with mini-panel content
-    const content = createMiniPanelHtml(qso, isActive);
+    const content = createMiniPanelHtml(qso, isActive, panelId);
     const infoWindow = new google.maps.InfoWindow({
         content: content,
         disableAutoPan: true,
@@ -334,33 +295,36 @@ function addQsoToMap(qso, isActive) {
         qso: qso,
         isDot: false,
         isActive: isActive,
-        _infoOpen: isActive,
-        _iwL6: null,  // cached DOM ref to the L6 container for z-order
+        _infoOpen: showCard,
+        _panelId: panelId,
+        _iwL6: null,
     };
     qsoEntries.push(entry);
 
-    if (isActive) {
+    if (showCard) {
         infoWindow.open(map, marker);
     }
 
-    // On domready, cache the L6 container, bring active to front,
-    // and add click handler on the card to bring it to front
+    // On domready: find L6 via getElementById + DOM walk-up,
+    // attach click-to-front, and always ensure active card is on top
     google.maps.event.addListener(infoWindow, 'domready', () => {
-        if (!entry._iwL6) {
-            cacheIwContainer(entry);
+        const panelEl = document.getElementById(entry._panelId);
+        if (panelEl) {
+            let el = panelEl;
+            while (el && !el.classList.contains('gm-style-iw-a')) {
+                el = el.parentElement;
+            }
+            if (el && el.parentElement) {
+                entry._iwL6 = el.parentElement;
+            }
+            panelEl.style.cursor = 'pointer';
+            panelEl.onclick = () => bringToFront(entry);
         }
-        if (entry.isActive) {
-            bringToFront(entry);
-        }
-        // Attach click-to-front on the card content itself
-        // (marker click doesn't fire when InfoWindow covers it)
-        const iwA = entry._iwL6 ? entry._iwL6.querySelector('.gm-style-iw-a') : null;
-        if (iwA) {
-            iwA.onclick = () => bringToFront(entry);
-        }
+        // Every domready: ensure active card stays on top
+        ensureActiveOnTop();
     });
 
-    // Click to toggle info window
+    // Click marker to toggle info window
     marker.addListener('click', () => {
         if (entry._infoOpen) {
             infoWindow.close();
@@ -371,23 +335,21 @@ function addQsoToMap(qso, isActive) {
             }
         } else {
             if (entry.isDot) {
-                infoWindow.setContent(createMiniPanelHtml(entry.qso, false));
+                infoWindow.setContent(createMiniPanelHtml(entry.qso, false, entry._panelId));
                 marker.setIcon(getMarkerIcon(false));
-                entry._iwL6 = null;  // content changed, need to recache
             }
             infoWindow.open(map, marker);
             entry._infoOpen = true;
-            // bringToFront will be called on domready
         }
     });
 }
 
-function createMiniPanelHtml(qso, isActive) {
+function createMiniPanelHtml(qso, isActive, panelId) {
     const sizeClass = isActive ? 'active' : 'past';
     const distStr = qso.distance_km.toLocaleString(undefined, { maximumFractionDigits: 0 });
 
     return `
-        <div class="mini-panel ${sizeClass}">
+        <div id="${panelId}" class="mini-panel ${sizeClass}">
             <div class="mp-callsign">${escapeHtml(qso.callsign)}</div>
             <div class="mp-location">${escapeHtml(qso.city_name)}</div>
             <div class="mp-info">
@@ -436,7 +398,7 @@ function shrinkActivePanels() {
             entry.isActive = false;
             entry.marker.setIcon(getMarkerIcon(false));
             entry.marker.setZIndex(500);
-            entry.infoWindow.setContent(createMiniPanelHtml(entry.qso, false));
+            entry.infoWindow.setContent(createMiniPanelHtml(entry.qso, false, entry._panelId));
         }
     });
 }
@@ -464,6 +426,8 @@ function clearAllMarkers() {
         entry.infoWindow.close();
     });
     qsoEntries.length = 0;
+    farthestLines.forEach(line => line.setMap(null));
+    farthestLines.length = 0;
 }
 
 

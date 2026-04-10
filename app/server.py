@@ -10,6 +10,7 @@ from flask_socketio import SocketIO
 
 from .i18n import set_language, get_all_translations, get_current_language
 from .services.cty_parser import CtyDat
+from .services.geo_utils import grid_to_latlon
 from .services.jcc_resolver import JccResolver
 from .services.location_resolver import LocationResolver
 from .services.hamlog_mst import HamlogMst
@@ -30,7 +31,9 @@ def load_config(config_path: str) -> dict:
         return yaml.safe_load(f)
 
 
-def create_app(config_path: str = "config.yaml") -> Flask:
+def create_app(config_path: str = "config.yaml",
+               grid_square: str | None = None,
+               open_cards: int | None = None) -> Flask:
     """Create and configure the Flask application."""
     global monitor, config
 
@@ -96,13 +99,28 @@ def create_app(config_path: str = "config.yaml") -> Flask:
     mst = HamlogMst()
     mst.load(mst_path)
 
+    # Station location from grid square
+    grid = grid_square or config.get("station", {}).get("grid_square", "PM95UQ")
+    coords = grid_to_latlon(grid)
+    if not coords:
+        logger.error("Invalid grid square: %s, using default PM95UQ", grid)
+        coords = grid_to_latlon("PM95UQ")
+    station_lat, station_lon = coords
+    # Store resolved station coords for routes
+    config.setdefault("_station", {})
+    config["_station"]["latitude"] = station_lat
+    config["_station"]["longitude"] = station_lon
+    config["_station"]["grid_square"] = grid
+
+    # Store open_cards setting
+    config["_open_cards"] = open_cards if open_cards is not None else config.get("dashboard", {}).get("open_cards", 1)
+
     # Location resolver
-    station = config.get("station", {})
     resolver = LocationResolver(
         cty=cty,
         jcc=jcc,
-        station_lat=station.get("latitude", 35.6812),
-        station_lon=station.get("longitude", 139.7671),
+        station_lat=station_lat,
+        station_lon=station_lon,
         mst=mst,
     )
 
@@ -134,16 +152,17 @@ def register_routes(app: Flask) -> None:
     @app.route("/")
     def index():
         translations = get_all_translations()
-        station = config.get("station", {})
+        st = config.get("_station", {})
         google_api_key = config.get("google_maps", {}).get("api_key", "")
         return render_template(
             "dashboard.html",
             translations=translations,
             lang=get_current_language(),
-            station_lat=station.get("latitude", 35.6812),
-            station_lon=station.get("longitude", 139.7671),
-            station_call=station.get("callsign", ""),
+            station_lat=st.get("latitude", 35.6812),
+            station_lon=st.get("longitude", 139.7671),
+            station_call=config.get("station", {}).get("callsign", ""),
             google_api_key=google_api_key,
+            open_cards=config.get("_open_cards", 1),
         )
 
     @app.route("/api/translations/<lang>")
@@ -200,7 +219,7 @@ def register_socket_events() -> None:
 def start_monitoring(initial_qso_count: int | None = None) -> None:
     """Start the log monitor (call after app is created)."""
     if monitor:
-        count = initial_qso_count if initial_qso_count is not None else config.get("dashboard", {}).get("initial_qso_count", 1)
+        count = initial_qso_count if initial_qso_count is not None else config.get("dashboard", {}).get("initial_qso_count", 100)
         monitor.load_initial_qsos(count)
         monitor.start(
             background_task_fn=socketio.start_background_task,

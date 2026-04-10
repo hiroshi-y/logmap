@@ -38,14 +38,29 @@ def main():
         help="path to config.yaml (default: config.yaml in project root)",
     )
     parser.add_argument(
+        "-g", "--grid",
+        default=None,
+        help="station QTH as Maidenhead grid square (default: PM95UQ)",
+    )
+    parser.add_argument(
         "-n", "--initial-qsos",
         type=int,
         default=None,
-        help="number of past QSOs to preload (default: 1, from config)",
+        help="number of past QSOs to preload (default: 100)",
+    )
+    parser.add_argument(
+        "-k", "--open-cards",
+        type=int,
+        default=None,
+        help="number of latest QSO cards to show open (default: 1)",
     )
     args = parser.parse_args()
 
-    app = create_app(args.config)
+    app = create_app(
+        config_path=args.config,
+        grid_square=args.grid,
+        open_cards=args.open_cards,
+    )
 
     with open(args.config, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
