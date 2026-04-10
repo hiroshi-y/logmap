@@ -322,12 +322,16 @@ function addQsoToMap(qso, isActive, showCard) {
             panelEl.style.cursor = 'pointer';
             panelEl.onclick = () => bringToFront(entry);
         }
-        // After the last card finishes rendering, raise the active card
+        // After the last card renders, raise active on the next event loop
+        // tick (same timing as a real user click — Google Maps may still
+        // adjust z-index within the current domready cycle).
         if (_pendingDomready > 0) {
             _pendingDomready--;
             if (_pendingDomready === 0) {
-                const active = qsoEntries.find(e => e.isActive);
-                if (active) bringToFront(active);
+                setTimeout(() => {
+                    const active = qsoEntries.find(e => e.isActive);
+                    if (active) bringToFront(active);
+                }, 0);
             }
         }
     });
