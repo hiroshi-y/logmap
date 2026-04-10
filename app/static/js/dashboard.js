@@ -229,26 +229,26 @@ function addQsoToMap(qso, isActive) {
         pixelOffset: new google.maps.Size(0, -5),
     });
 
-    if (isActive) {
-        infoWindow.open(map, marker);
-        bringInfoWindowToFront(infoWindow);
-    }
-
-    // Store entry
-    qsoEntries.push({
+    // Store entry (must be created before opening InfoWindow)
+    const entry = {
         marker: marker,
         infoWindow: infoWindow,
         qso: qso,
         isDot: false,
         isActive: isActive,
         _infoOpen: isActive,
-    });
+        _panelId: panelIdCounter,  // matches data-panel-id in the HTML
+        _iwContainer: null,        // cached DOM ref, set on first domready
+    };
+    qsoEntries.push(entry);
+
+    if (isActive) {
+        infoWindow.open(map, marker);
+        bringInfoWindowToFront(entry);
+    }
 
     // Click to toggle info window (for dots: restore card, re-click: back to dot)
     marker.addListener('click', () => {
-        const entry = qsoEntries.find(e => e.marker === marker);
-        if (!entry) return;
-
         if (entry._infoOpen) {
             // Close the card; if it was a dot, return to dot appearance
             infoWindow.close();
@@ -263,9 +263,10 @@ function addQsoToMap(qso, isActive) {
                 const content = createMiniPanelHtml(entry.qso, false);
                 infoWindow.setContent(content);
                 marker.setIcon(getMarkerIcon(false));
+                entry._iwContainer = null;  // content changed, recapture
             }
             infoWindow.open(map, marker);
-            bringInfoWindowToFront(infoWindow);
+            bringInfoWindowToFront(entry);
             entry._infoOpen = true;
         }
     });
@@ -290,25 +291,34 @@ function createMiniPanelHtml(qso, isActive) {
     `;
 }
 
-function bringInfoWindowToFront(infoWindow) {
-    google.maps.event.addListenerOnce(infoWindow, 'domready', () => {
-        // Find the mini-panel element just rendered
-        const panels = document.querySelectorAll('.mini-panel[data-panel-id]');
-        const panel = panels[panels.length - 1];
+function captureInfoWindowContainer(entry) {
+    // On domready, walk up from the mini-panel to find the InfoWindow's
+    // outermost absolutely-positioned container and cache it on the entry.
+    google.maps.event.addListenerOnce(entry.infoWindow, 'domready', () => {
+        const panelId = entry._panelId;
+        const panel = document.querySelector(`.mini-panel[data-panel-id="${panelId}"]`);
         if (!panel) return;
-        // Walk up the DOM to the InfoWindow's outermost container
         let node = panel;
         while (node && node.parentElement) {
             node = node.parentElement;
-            // The outermost positioned wrapper before the map pane
             if (node.style && node.style.position === 'absolute'
                 && node.parentElement && node.parentElement.style
                 && node.parentElement.style.position === 'absolute') {
+                entry._iwContainer = node;
                 node.style.zIndex = String(++nextZIndex);
                 break;
             }
         }
     });
+}
+
+function bringInfoWindowToFront(entry) {
+    if (entry._iwContainer) {
+        entry._iwContainer.style.zIndex = String(++nextZIndex);
+    } else {
+        // First time — capture the container reference
+        captureInfoWindowContainer(entry);
+    }
 }
 
 function getMarkerIcon(isActive) {
