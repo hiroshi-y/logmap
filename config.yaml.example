@@ -18,7 +18,7 @@ hamlog:
   # Path to the Turbo HAMLOG data directory
   data_dir: "C:\\Hamlog\\Data"
   # Main database file name
-  db_file: "Hamlog50.hdb"
+  db_file: "Hamlog.hdb"
   # Polling interval in seconds
   poll_interval: 3
 

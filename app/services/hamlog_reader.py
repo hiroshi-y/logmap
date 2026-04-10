@@ -1,252 +1,323 @@
-"""Turbo HAMLOG .hdb file reader.
+"""Turbo HAMLOG Hamlog.hdb reader.
 
-Turbo HAMLOG stores QSO records in a fixed-length binary file format (.hdb).
-Each record is a fixed number of bytes. The file has a header followed by records.
+Hamlog.hdb is a dBASE III compatible file. The header begins at offset 0
+and contains record-count, header-length and record-size (see dBASE spec).
+Field descriptors follow the 32-byte file header and are terminated by 0x0D.
 
-Reference: Turbo HAMLOG record format (Hamlog50.hdb)
-- Header: 2048 bytes
-- Each record: 256 bytes (Turbo HAMLOG v5)
+Field layout (as present in Turbo HAMLOG Ver5.x Hamlog.hdb, confirmed against
+hiroshi-y's live file):
 
-Record fields (offsets are approximate - may need adjustment for specific versions):
+    offset  len type name
+       0      1   -   delete mark (0x20 = active, 0x2A = deleted)
+       1      6   C   CALLS
+       7     14   C   IGN (ignored)
+      21      4   B   DATE   [century, yy, mm, dd]
+      25      2   B   TIME   [hh, mm | 0x80 for UTC]
+      27      6   C   CODE   (JCC/JCG)
+      33      6   C   GL     (grid locator)
+      39      3   C   QSL
+      42      2   C   FLAG
+      44      3   C   HIS    (RST sent)
+      47      3   C   MY     (RST rcvd)
+      50      7   C   FREQ
+      57      4   C   MODE
+      61     12   C   NAME
+      73     28   C   QTH    (Shift_JIS)
+     101     54   C   RMK1   (Shift_JIS)
+     155     54   C   RMK2   (Shift_JIS)
+
+IMPORTANT: Turbo HAMLOG opens Hamlog.hdb with exclusive access by default.
+To allow external readers (like LogMap), start HAMLOG with the `-S` switch,
+e.g. `Hamlogw.exe -S`. See the HAMLOG50 API documentation for details.
 """
 
+import logging
 import os
 import struct
-import logging
 from dataclasses import dataclass
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-# Turbo HAMLOG v5 constants
-HEADER_SIZE = 2048
-RECORD_SIZE = 256
+
+# dBASE header constants
+DBASE_HEADER_BASE = 32  # size of the file header before field descriptors
+DBASE_FIELD_SIZE = 32   # size of each field descriptor
+DBASE_HEADER_TERMINATOR = 0x0D
+
+# Record delete marker: 0x20 = active, 0x2A = deleted
+DELETE_MARK_ACTIVE = 0x20
 
 
 @dataclass
 class HamlogQso:
-    """Represents a single QSO record from Turbo HAMLOG."""
+    """A single QSO record from Turbo HAMLOG."""
     callsign: str
     date: str           # YYYY/MM/DD
-    time_on: str        # HHMM
-    band: str           # e.g. "7", "14", "144", "430"
-    mode: str           # e.g. "CW", "SSB", "FM", "FT8"
+    time_on: str        # HH:MM (UTC if utc=True)
+    utc: bool
+    band: str           # e.g. "7", "14", "144"
+    mode: str           # e.g. "CW", "SSB", "FT8"
     rst_sent: str
     rst_rcvd: str
-    qth: str            # QTH field
-    name: str           # Operator name
-    remarks: str        # Remarks / notes
-    jcc_code: str       # JCC/JCG code
-    gl: str             # Grid locator
-    frequency: str      # Frequency string
+    qth: str
+    name: str
+    remarks: str
+    jcc_code: str
+    gl: str             # grid locator
+    frequency: str      # raw frequency text (e.g. "7.075")
 
     @property
     def datetime_str(self) -> str:
-        return f"{self.date} {self.time_on}"
+        return f"{self.date} {self.time_on}{'Z' if self.utc else ''}"
 
 
-def _read_fixed_string(data: bytes, offset: int, length: int,
-                       encoding: str = "shift_jis") -> str:
-    """Read a fixed-length string from binary data, stripping null bytes."""
-    raw = data[offset:offset + length]
-    # Strip null bytes and trailing spaces
+# ---------------------------------------------------------------------------
+# Low-level helpers
+# ---------------------------------------------------------------------------
+
+def _decode_ascii(raw: bytes) -> str:
+    return raw.split(b"\x00")[0].decode("ascii", errors="replace").strip()
+
+
+def _decode_sjis(raw: bytes) -> str:
     raw = raw.split(b"\x00")[0]
     try:
-        return raw.decode(encoding).strip()
+        return raw.decode("cp932").strip()
     except (UnicodeDecodeError, ValueError):
-        try:
-            return raw.decode("latin-1").strip()
-        except (UnicodeDecodeError, ValueError):
-            return ""
+        return raw.decode("latin-1", errors="replace").strip()
 
+
+def _format_date(raw: bytes) -> str:
+    """Decode the 4-byte date field [century, yy, mm, dd] -> 'YYYY/MM/DD'."""
+    if len(raw) < 4 or raw[0] == 0:
+        return ""
+    century, yy, mm, dd = raw[0], raw[1], raw[2], raw[3]
+    if mm == 0 or dd == 0:
+        return ""
+    year = century * 100 + yy
+    return f"{year:04d}/{mm:02d}/{dd:02d}"
+
+
+def _format_time(raw: bytes) -> tuple[str, bool]:
+    """Decode the 2-byte time field [hh, mm | 0x80=UTC] -> ('HH:MM', is_utc)."""
+    if len(raw) < 2:
+        return ("", False)
+    hour = raw[0] & 0x3F
+    minute_byte = raw[1]
+    is_utc = bool(minute_byte & 0x80)
+    minute = minute_byte & 0x7F
+    if hour > 23 or minute > 59:
+        return ("", is_utc)
+    return (f"{hour:02d}:{minute:02d}", is_utc)
+
+
+def _freq_to_band(freq_text: str) -> str:
+    """Map a frequency text (MHz) to the conventional amateur band label."""
+    try:
+        freq_mhz = float(freq_text)
+    except (TypeError, ValueError):
+        return freq_text.strip() or "?"
+    bands = [
+        (0.5,    "135k"),
+        (2.0,    "1.8"),
+        (4.0,    "3.5"),
+        (6.0,    "5"),
+        (8.0,    "7"),
+        (12.0,   "10"),
+        (15.5,   "14"),
+        (19.0,   "18"),
+        (22.0,   "21"),
+        (26.0,   "24"),
+        (30.0,   "28"),
+        (55.0,   "50"),
+        (148.0,  "144"),
+        (450.0,  "430"),
+        (1300.0, "1200"),
+        (2500.0, "2400"),
+        (5900.0, "5600"),
+    ]
+    for upper, label in bands:
+        if freq_mhz < upper:
+            return label
+    return "SHF"
+
+
+# ---------------------------------------------------------------------------
+# HamlogReader
+# ---------------------------------------------------------------------------
 
 class HamlogReader:
-    """Reader for Turbo HAMLOG .hdb files."""
+    """Read QSOs from a Turbo HAMLOG Hamlog.hdb file (dBASE III format)."""
 
     def __init__(self, filepath: str):
         self._filepath = filepath
-        self._record_count = 0
+        self._header_len: int = 0
+        self._record_size: int = 0
+        self._fields: list[tuple[str, int, int]] = []  # (name, offset, length)
+        self._header_loaded = False
 
     @property
     def filepath(self) -> str:
         return self._filepath
 
-    def get_record_count(self) -> int:
-        """Get the total number of records in the file."""
-        if not os.path.exists(self._filepath):
-            return 0
-        file_size = os.path.getsize(self._filepath)
-        if file_size <= HEADER_SIZE:
-            return 0
-        return (file_size - HEADER_SIZE) // RECORD_SIZE
+    # ---- Header / structure ------------------------------------------------
 
-    def read_record(self, index: int) -> HamlogQso | None:
-        """Read a single QSO record by index (0-based)."""
+    def _load_header(self) -> bool:
+        """Parse the dBASE header to learn record layout. Returns True on success."""
+        if self._header_loaded:
+            return True
+        if not os.path.exists(self._filepath):
+            return False
         try:
             with open(self._filepath, "rb") as f:
-                offset = HEADER_SIZE + index * RECORD_SIZE
-                f.seek(offset)
-                data = f.read(RECORD_SIZE)
-                if len(data) < RECORD_SIZE:
-                    return None
-                return self._parse_record(data)
-        except (IOError, OSError) as e:
-            logger.error("Error reading record %d: %s", index, e)
+                head = f.read(DBASE_HEADER_BASE)
+                if len(head) < DBASE_HEADER_BASE:
+                    return False
+
+                # offset 8: header length, 10: record size (both uint16 LE)
+                header_len = struct.unpack_from("<H", head, 8)[0]
+                record_size = struct.unpack_from("<H", head, 10)[0]
+                if header_len <= DBASE_HEADER_BASE or record_size < 1:
+                    return False
+
+                # Read field descriptors
+                fields: list[tuple[str, int, int]] = []
+                offset = 1  # byte 0 is the delete mark
+                while True:
+                    fd = f.read(DBASE_FIELD_SIZE)
+                    if not fd or fd[0] == DBASE_HEADER_TERMINATOR:
+                        break
+                    if len(fd) < DBASE_FIELD_SIZE:
+                        break
+                    name = fd[:11].split(b"\x00")[0].decode("ascii", errors="replace")
+                    flen = fd[16]
+                    fields.append((name, offset, flen))
+                    offset += flen
+
+            self._header_len = header_len
+            self._record_size = record_size
+            self._fields = fields
+            self._header_loaded = True
+            logger.info(
+                "HDB header: header_len=%d, record_size=%d, fields=%d",
+                header_len, record_size, len(fields),
+            )
+            return True
+        except (IOError, OSError, PermissionError) as e:
+            logger.error(
+                "Cannot open Hamlog.hdb (%s). Is HAMLOG started with '-S'?", e,
+            )
+            return False
+
+    def _field(self, name: str) -> tuple[int, int] | None:
+        for fname, off, flen in self._fields:
+            if fname == name:
+                return (off, flen)
+        return None
+
+    # ---- Public record API -------------------------------------------------
+
+    def get_record_count(self) -> int:
+        """Return the number of *active* (non-deleted) records in the file."""
+        if not self._load_header():
+            return 0
+        try:
+            file_size = os.path.getsize(self._filepath)
+        except OSError:
+            return 0
+        if file_size <= self._header_len:
+            return 0
+        raw_count = (file_size - self._header_len) // self._record_size
+        return max(0, raw_count)
+
+    def read_record(self, index: int) -> HamlogQso | None:
+        if not self._load_header():
             return None
+        try:
+            with open(self._filepath, "rb") as f:
+                f.seek(self._header_len + index * self._record_size)
+                data = f.read(self._record_size)
+        except (IOError, OSError, PermissionError) as e:
+            logger.error("Read error on record %d: %s", index, e)
+            return None
+        if len(data) < self._record_size:
+            return None
+        return self._parse_record(data)
 
     def read_last_n_records(self, n: int) -> list[HamlogQso]:
-        """Read the last N records from the file."""
         total = self.get_record_count()
         if total == 0:
             return []
-
         start = max(0, total - n)
-        records = []
-
-        try:
-            with open(self._filepath, "rb") as f:
-                for i in range(start, total):
-                    offset = HEADER_SIZE + i * RECORD_SIZE
-                    f.seek(offset)
-                    data = f.read(RECORD_SIZE)
-                    if len(data) < RECORD_SIZE:
-                        break
-                    qso = self._parse_record(data)
-                    if qso and qso.callsign:
-                        records.append(qso)
-        except (IOError, OSError) as e:
-            logger.error("Error reading records: %s", e)
-
-        return records
+        return self._read_range(start, total)
 
     def read_records_from(self, start_index: int) -> list[HamlogQso]:
-        """Read all records starting from a given index."""
         total = self.get_record_count()
         if start_index >= total:
             return []
+        return self._read_range(start_index, total)
 
-        records = []
+    # ---- Internals ---------------------------------------------------------
+
+    def _read_range(self, start: int, stop: int) -> list[HamlogQso]:
+        records: list[HamlogQso] = []
+        if not self._load_header():
+            return records
         try:
             with open(self._filepath, "rb") as f:
-                for i in range(start_index, total):
-                    offset = HEADER_SIZE + i * RECORD_SIZE
-                    f.seek(offset)
-                    data = f.read(RECORD_SIZE)
-                    if len(data) < RECORD_SIZE:
-                        break
-                    qso = self._parse_record(data)
-                    if qso and qso.callsign:
-                        records.append(qso)
-        except (IOError, OSError) as e:
-            logger.error("Error reading records from %d: %s", start_index, e)
+                f.seek(self._header_len + start * self._record_size)
+                block = f.read((stop - start) * self._record_size)
+        except (IOError, OSError, PermissionError) as e:
+            logger.error("Read error in range %d..%d: %s", start, stop, e)
+            return records
 
+        rsize = self._record_size
+        for i in range(0, len(block), rsize):
+            data = block[i:i + rsize]
+            if len(data) < rsize:
+                break
+            qso = self._parse_record(data)
+            if qso:
+                records.append(qso)
         return records
 
+    def _get(self, data: bytes, name: str) -> bytes:
+        loc = self._field(name)
+        if not loc:
+            return b""
+        off, flen = loc
+        return data[off:off + flen]
+
     def _parse_record(self, data: bytes) -> HamlogQso | None:
-        """Parse a single 256-byte record into a HamlogQso.
-
-        Turbo HAMLOG v5 record layout (approximate offsets):
-        Offset  Length  Field
-        0       12      Callsign
-        12      8       Date (YYYYMMDD)
-        20      4       Time (HHMM)
-        24      4       Band code / Frequency
-        28      4       Mode
-        32      3       RST Sent
-        35      3       RST Received
-        38      30      QTH (Shift_JIS)
-        68      20      Name (Shift_JIS)
-        88      64      Remarks (Shift_JIS)
-        152     8       JCC/JCG code
-        160     6       Grid Locator
-        166     10      Frequency string
-        (remaining bytes are padding/reserved)
-
-        NOTE: These offsets are approximate. Actual offsets may vary by
-        Turbo HAMLOG version. Adjust as needed.
-        """
-        try:
-            callsign = _read_fixed_string(data, 0, 12, "ascii")
-            if not callsign:
-                return None
-
-            date_raw = _read_fixed_string(data, 12, 8, "ascii")
-            time_raw = _read_fixed_string(data, 20, 4, "ascii")
-
-            # Format date
-            date_str = date_raw
-            if len(date_raw) == 8:
-                date_str = f"{date_raw[:4]}/{date_raw[4:6]}/{date_raw[6:8]}"
-
-            band = _read_fixed_string(data, 24, 4, "ascii")
-            mode = _read_fixed_string(data, 28, 4, "ascii")
-            rst_sent = _read_fixed_string(data, 32, 3, "ascii")
-            rst_rcvd = _read_fixed_string(data, 35, 3, "ascii")
-            qth = _read_fixed_string(data, 38, 30, "shift_jis")
-            name = _read_fixed_string(data, 68, 20, "shift_jis")
-            remarks = _read_fixed_string(data, 88, 64, "shift_jis")
-            jcc_code = _read_fixed_string(data, 152, 8, "ascii")
-            gl = _read_fixed_string(data, 160, 6, "ascii")
-            frequency = _read_fixed_string(data, 166, 10, "ascii")
-
-            return HamlogQso(
-                callsign=callsign.upper(),
-                date=date_str,
-                time_on=time_raw,
-                band=self._normalize_band(band, frequency),
-                mode=mode.upper(),
-                rst_sent=rst_sent,
-                rst_rcvd=rst_rcvd,
-                qth=qth,
-                name=name,
-                remarks=remarks,
-                jcc_code=jcc_code,
-                gl=gl,
-                frequency=frequency,
-            )
-        except Exception as e:
-            logger.error("Error parsing record: %s", e)
+        # Skip deleted records
+        if not data or data[0] != DELETE_MARK_ACTIVE:
             return None
 
-    def _normalize_band(self, band: str, frequency: str) -> str:
-        """Normalize band designation to standard format."""
-        # Try to determine band from frequency if band field is unclear
-        band = band.strip()
-        if band:
-            return band
+        callsign = _decode_ascii(self._get(data, "CALLS"))
+        if not callsign:
+            return None
 
-        # Attempt to parse from frequency
-        try:
-            freq_mhz = float(frequency)
-            if freq_mhz < 0.5:
-                return "135k"
-            elif freq_mhz < 2:
-                return "1.8"
-            elif freq_mhz < 4:
-                return "3.5"
-            elif freq_mhz < 8:
-                return "7"
-            elif freq_mhz < 11:
-                return "10"
-            elif freq_mhz < 15:
-                return "14"
-            elif freq_mhz < 19:
-                return "18"
-            elif freq_mhz < 22:
-                return "21"
-            elif freq_mhz < 26:
-                return "24"
-            elif freq_mhz < 30:
-                return "28"
-            elif freq_mhz < 55:
-                return "50"
-            elif freq_mhz < 148:
-                return "144"
-            elif freq_mhz < 450:
-                return "430"
-            elif freq_mhz < 1300:
-                return "1200"
-        except (ValueError, TypeError):
-            pass
+        date_raw = self._get(data, "DATE")
+        time_raw = self._get(data, "TIME")
+        date_str = _format_date(date_raw)
+        time_str, is_utc = _format_time(time_raw)
 
-        return band or "?"
+        freq_text = _decode_ascii(self._get(data, "FREQ"))
+        mode = _decode_ascii(self._get(data, "MODE")).upper()
+
+        return HamlogQso(
+            callsign=callsign.upper(),
+            date=date_str,
+            time_on=time_str,
+            utc=is_utc,
+            band=_freq_to_band(freq_text),
+            mode=mode,
+            rst_sent=_decode_ascii(self._get(data, "HIS")),
+            rst_rcvd=_decode_ascii(self._get(data, "MY")),
+            qth=_decode_sjis(self._get(data, "QTH")),
+            name=_decode_sjis(self._get(data, "NAME")),
+            remarks=_decode_sjis(self._get(data, "RMK1")),
+            jcc_code=_decode_ascii(self._get(data, "CODE")),
+            gl=_decode_ascii(self._get(data, "GL")),
+            frequency=freq_text,
+        )
