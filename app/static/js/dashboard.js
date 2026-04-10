@@ -197,9 +197,9 @@ function jitterPosition(lat, lng) {
             && Math.abs(pos.lng() - lng) < threshold;
     });
     if (!overlap) return { lat, lng };
-    // Random offset 0.005–0.01 deg (~500m–1km) in a random direction
+    // Random offset 0.01–0.02 deg (~1–2km) in a random direction
     const angle = Math.random() * 2 * Math.PI;
-    const dist = 0.005 + Math.random() * 0.005;
+    const dist = 0.01 + Math.random() * 0.01;
     return { lat: lat + dist * Math.sin(angle), lng: lng + dist * Math.cos(angle) };
 }
 
@@ -230,10 +230,13 @@ function addQsoToMap(qso, isActive) {
     });
 
     if (isActive) {
-        // Ensure active card's InfoWindow renders above all others
-        google.maps.event.addListenerOnce(infoWindow, 'domready', () => {
-            const iwOuter = document.querySelector('.gm-style-iw-a');
-            if (iwOuter) iwOuter.style.zIndex = String(nextZIndex + 1);
+        // Close and re-open all visible InfoWindows so that this
+        // (the active one, opened last) renders on top of all others.
+        qsoEntries.forEach(e => {
+            if (e._infoOpen && e.infoWindow !== infoWindow) {
+                e.infoWindow.close();
+                e.infoWindow.open(map, e.marker);
+            }
         });
         infoWindow.open(map, marker);
     }
@@ -268,8 +271,9 @@ function addQsoToMap(qso, isActive) {
                 infoWindow.setContent(content);
                 marker.setIcon(getMarkerIcon(false));
             }
-            // Bring this marker to front so its card is above others
-            marker.setZIndex(++nextZIndex);
+            // Close then re-open: Google Maps renders the last-opened
+            // InfoWindow on top, so this brings it to the front.
+            infoWindow.close();
             infoWindow.open(map, marker);
             entry._infoOpen = true;
         }
@@ -280,7 +284,22 @@ function createMiniPanelHtml(qso, isActive) {
     const sizeClass = isActive ? 'active new' : 'past';
     const distStr = qso.distance_km.toLocaleString(undefined, { maximumFractionDigits: 0 });
 
+    // Inline the flash animation so it works inside Google Maps' InfoWindow DOM
+    const flashStyle = isActive ? `
+        <style>
+            @keyframes flashBorder {
+                0%, 100% { box-shadow: 0 0 8px 2px rgba(255, 200, 0, 0.3); }
+                50%      { box-shadow: 0 0 16px 6px rgba(255, 200, 0, 1); }
+            }
+            .mini-panel.active {
+                animation: flashBorder 1.5s ease-in-out infinite;
+                box-shadow: 0 0 8px 2px rgba(255, 200, 0, 0.8);
+            }
+        </style>
+    ` : '';
+
     return `
+        ${flashStyle}
         <div class="mini-panel ${sizeClass}">
             <div class="mp-callsign">${escapeHtml(qso.callsign)}</div>
             <div class="mp-location">${escapeHtml(qso.city_name)}</div>
