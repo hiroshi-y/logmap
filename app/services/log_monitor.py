@@ -8,6 +8,7 @@ import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, date
+from typing import Callable
 
 from .hamlog_reader import HamlogReader, HamlogQso
 from .location_resolver import LocationResolver, ResolvedLocation
@@ -53,7 +54,8 @@ class LogMonitor:
         self._on_new_qso = on_new_qso
         self._last_count = 0
         self._stop_event = threading.Event()
-        self._thread: threading.Thread | None = None
+        self._sleep_fn: Callable = time.sleep  # overridden when using eventlet
+        self._thread = None
         self._today_qsos: list[QsoEvent] = []
         self._today_date: date | None = None
         self._stats = {
@@ -63,17 +65,21 @@ class LogMonitor:
             "farthest_distance": 0.0,
         }
 
-    def start(self, background_task_fn=None) -> None:
+    def start(self, background_task_fn=None, sleep_fn=None) -> None:
         """Start monitoring in a background thread.
 
         Args:
             background_task_fn: Optional callable to start the background
-                task (e.g. ``socketio.start_background_task``).  When
-                provided, the poll loop runs inside the async framework
-                (eventlet/gevent) instead of a raw OS thread.
+                task (e.g. ``socketio.start_background_task``).
+            sleep_fn: Optional sleep function (e.g. ``socketio.sleep``)
+                that yields to the event loop.  Required when using
+                eventlet/gevent so the poll loop doesn't block.
         """
-        if self._thread and self._thread.is_alive():
+        if self._thread and hasattr(self._thread, 'is_alive') and self._thread.is_alive():
             return
+
+        if sleep_fn:
+            self._sleep_fn = sleep_fn
 
         # Initialize with current record count
         self._last_count = self._reader.get_record_count()
@@ -142,7 +148,7 @@ class LogMonitor:
             except Exception as e:
                 logger.error("Error in poll loop: %s", e)
 
-            self._stop_event.wait(self._poll_interval)
+            self._sleep_fn(self._poll_interval)
 
     def _check_date_rollover(self) -> None:
         """Clear data when crossing midnight (local time)."""
