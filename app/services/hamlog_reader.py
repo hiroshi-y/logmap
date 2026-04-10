@@ -294,19 +294,15 @@ class HamlogReader:
         if not data or data[0] != DELETE_MARK_ACTIVE:
             return None
 
-        # HAMLOG splits the 20-byte callsign column into CALLS(6) + IGN(14)
-        # for indexing, but the full callsign including portable suffix
-        # ("JO3OPP/3") lives across both fields. Read the two contiguously.
-        calls_loc = self._field("CALLS")
-        ign_loc = self._field("IGN")
-        if calls_loc and ign_loc:
-            off = calls_loc[0]
-            total = calls_loc[1] + ign_loc[1]
-            callsign = _decode_ascii(data[off:off + total])
-        else:
-            callsign = _decode_ascii(self._get(data, "CALLS"))
-        if not callsign:
+        # HAMLOG stores the base callsign in CALLS(6) and the portable
+        # suffix — without the slash — right-aligned in IGN(14). For
+        # example JO3OPP/3 is stored as CALLS="JO3OPP", IGN="             3".
+        # Reassemble as "CALLS/IGN" when IGN is non-empty.
+        base = _decode_ascii(self._get(data, "CALLS"))
+        suffix = _decode_ascii(self._get(data, "IGN"))
+        if not base:
             return None
+        callsign = f"{base}/{suffix}" if suffix else base
 
         date_raw = self._get(data, "DATE")
         time_raw = self._get(data, "TIME")
