@@ -109,6 +109,9 @@ function initMap() {
     });
     document.getElementById('btn-reset-zoom').addEventListener('click', resetZoom);
 
+    // ---- DEBUG: two test pins with z-order display ----
+    addDebugPins();
+
     // Initialize SocketIO after map is ready
     initSocketIO();
 
@@ -158,6 +161,75 @@ function bringToFront(entry) {
     if (entry._iwL6) {
         entry._iwL6.style.zIndex = String(++nextIwZIndex);
     }
+}
+
+
+/* ===== Debug Pins ===== */
+function addDebugPins() {
+    const pins = [
+        { id: 'dbgA', label: 'A', color: '#ff00ff', dLat: 0.15, dLng: 0.15 },
+        { id: 'dbgB', label: 'B', color: '#00ffff', dLat: 0.17, dLng: 0.17 },
+    ];
+    pins.forEach(p => {
+        const pos = {
+            lat: LOGMAP_CONFIG.stationLat + p.dLat,
+            lng: LOGMAP_CONFIG.stationLon + p.dLng,
+        };
+        const marker = new google.maps.Marker({
+            position: pos, map: map,
+            icon: { path: google.maps.SymbolPath.CIRCLE, scale: 10,
+                    fillColor: p.color, fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 },
+            zIndex: 500,
+        });
+        const iw = new google.maps.InfoWindow({ disableAutoPan: true });
+        let iwL6 = null;
+
+        function updateContent() {
+            const z = iwL6 ? iwL6.style.zIndex : '(not cached)';
+            iw.setContent(
+                `<div id="${p.id}" style="background:${p.color};color:#fff;padding:12px;border-radius:6px;font-size:16px;cursor:pointer;min-width:150px;">` +
+                `<b>デバッグ ${p.label}</b><br>` +
+                `L6 z-index: <b>${z}</b><br>` +
+                `<small>カードをクリック → z-order UP</small></div>`
+            );
+        }
+
+        google.maps.event.addListener(iw, 'domready', () => {
+            // Cache L6: walk up from .gm-style-iw-a
+            if (!iwL6) {
+                const all = document.querySelectorAll('.gm-style-iw-a');
+                for (const el of all) {
+                    if (el.textContent.includes('デバッグ ' + p.label)) {
+                        iwL6 = el.parentElement;
+                        break;
+                    }
+                }
+            }
+            updateContent();
+
+            // Attach click on the card content
+            const el = document.getElementById(p.id);
+            if (el) {
+                el.onclick = () => {
+                    if (iwL6) {
+                        iwL6.style.zIndex = String(++nextIwZIndex);
+                        console.log(`${p.label}: set L6 zIndex to ${nextIwZIndex}`);
+                    } else {
+                        console.log(`${p.label}: iwL6 is null!`);
+                    }
+                    // Refresh display after a tick
+                    setTimeout(updateContent, 50);
+                };
+            }
+        });
+
+        // Open on pin click (pin is visible because no IW covers it initially)
+        marker.addListener('click', () => {
+            iw.open(map, marker);
+        });
+        // Auto-open
+        iw.open(map, marker);
+    });
 }
 
 
