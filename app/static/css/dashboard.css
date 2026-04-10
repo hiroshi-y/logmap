@@ -221,7 +221,7 @@ body {
     transform: scale(1);
     opacity: 1;
     box-shadow: 0 0 8px 2px rgba(255, 200, 0, 0.8);
-    animation: flashBorder 1.5s ease-in-out 4;
+    animation: flashBorder 1.5s ease-in-out infinite;
 }
 
 @keyframes flashBorder {

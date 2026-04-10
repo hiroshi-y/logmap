@@ -188,15 +188,33 @@ function initSocketIO() {
 
 
 /* ===== QSO Map Management ===== */
+function jitterPosition(lat, lng) {
+    // Check if another QSO already exists at (nearly) the same location
+    const threshold = 0.002; // ~200m
+    const overlap = qsoEntries.some(e => {
+        const pos = e.marker.getPosition();
+        return Math.abs(pos.lat() - lat) < threshold
+            && Math.abs(pos.lng() - lng) < threshold;
+    });
+    if (!overlap) return { lat, lng };
+    // Random offset 0.005–0.01 deg (~500m–1km) in a random direction
+    const angle = Math.random() * 2 * Math.PI;
+    const dist = 0.005 + Math.random() * 0.005;
+    return { lat: lat + dist * Math.sin(angle), lng: lng + dist * Math.cos(angle) };
+}
+
 function addQsoToMap(qso, isActive) {
-    const position = { lat: qso.latitude, lng: qso.longitude };
+    const position = jitterPosition(qso.latitude, qso.longitude);
+
+    // Active card always gets the highest z-index
+    const zIdx = isActive ? ++nextZIndex : 500;
 
     // Create marker
     const marker = new google.maps.Marker({
         position: position,
         map: map,
         icon: getMarkerIcon(isActive),
-        zIndex: isActive ? 999 : 500,
+        zIndex: zIdx,
     });
 
     if (isActive) {
@@ -212,6 +230,11 @@ function addQsoToMap(qso, isActive) {
     });
 
     if (isActive) {
+        // Ensure active card's InfoWindow renders above all others
+        google.maps.event.addListenerOnce(infoWindow, 'domready', () => {
+            const iwOuter = document.querySelector('.gm-style-iw-a');
+            if (iwOuter) iwOuter.style.zIndex = String(nextZIndex + 1);
+        });
         infoWindow.open(map, marker);
     }
 
