@@ -238,8 +238,9 @@ function addQsoToMap(qso, isActive) {
                 const content = createMiniPanelHtml(entry.qso, false);
                 infoWindow.setContent(content);
                 marker.setIcon(getMarkerIcon(false));
-                marker.setZIndex(500);
             }
+            // Bring this marker to front so its card is above others
+            marker.setZIndex(900);
             infoWindow.open(map, marker);
             entry._infoOpen = true;
         }

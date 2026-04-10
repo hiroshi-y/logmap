@@ -3,8 +3,9 @@ Entry point for the application.
 """
 
 import argparse
+import ctypes
+import ctypes.wintypes
 import os
-import signal
 import sys
 
 import yaml
@@ -13,6 +14,20 @@ import yaml
 sys.path.insert(0, os.path.dirname(__file__))
 
 from app.server import create_app, socketio, start_monitoring, monitor
+
+# ---- Immediate Ctrl+C handler via Win32 ----------------------------------
+# Python's signal.SIGINT is checked only periodically and can be delayed by
+# eventlet's event loop.  SetConsoleCtrlHandler fires at the OS level.
+
+@ctypes.WINFUNCTYPE(ctypes.wintypes.BOOL, ctypes.wintypes.DWORD)
+def _ctrl_handler(event):
+    if event == 0:  # CTRL_C_EVENT
+        if monitor:
+            monitor.stop()
+        os._exit(0)
+    return False
+
+ctypes.WinDLL("kernel32").SetConsoleCtrlHandler(_ctrl_handler, True)
 
 
 def main():
@@ -39,15 +54,6 @@ def main():
     port = config.get("dashboard", {}).get("port", 5000)
 
     start_monitoring(initial_qso_count=args.initial_qsos)
-
-    # Ensure Ctrl+C stops quickly
-    def _shutdown(signum, frame):
-        print("\nShutting down...")
-        if monitor:
-            monitor.stop()
-        os._exit(0)
-
-    signal.signal(signal.SIGINT, _shutdown)
 
     print(f"LogMap Dashboard starting on http://{host}:{port}")
     print("Press Ctrl+C to stop.")

@@ -51,49 +51,53 @@ DBASE_HEADER_TERMINATOR = 0x0D
 # Record delete marker: 0x20 = active, 0x2A = deleted
 DELETE_MARK_ACTIVE = 0x20
 
-# Retry settings for file access (Dropbox sync can briefly lock the file)
-_OPEN_RETRIES = 5
-_OPEN_RETRY_DELAY = 0.3  # seconds
+# Retry settings for file access
+_OPEN_RETRIES = 10
+_OPEN_RETRY_DELAY = 0.5  # seconds
 
-# Windows API constants
+# ---- Win32 low-level file read -----------------------------------------
+#
+# Use CreateFileW with GENERIC_READ and FILE_SHARE_READ|WRITE|DELETE —
+# this places no restrictions on other processes.  If another process
+# (HAMLOG or Dropbox) has opened without FILE_SHARE_READ, the call will
+# still fail (error 32); in that case we retry until they release the lock.
+#
 _GENERIC_READ = 0x80000000
 _FILE_SHARE_ALL = 0x07  # FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE
 _OPEN_EXISTING = 3
 _FILE_BEGIN = 0
 
 _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-
-# Properly type CreateFileW so the HANDLE comparison works on both
-# 32-bit and 64-bit Python (default restype is c_int which breaks the
-# INVALID_HANDLE_VALUE check).
 _kernel32.CreateFileW.restype = ctypes.wintypes.HANDLE
 _kernel32.CreateFileW.argtypes = [
-    ctypes.wintypes.LPCWSTR,  # lpFileName
-    ctypes.wintypes.DWORD,    # dwDesiredAccess
-    ctypes.wintypes.DWORD,    # dwShareMode
-    ctypes.c_void_p,          # lpSecurityAttributes
-    ctypes.wintypes.DWORD,    # dwCreationDisposition
-    ctypes.wintypes.DWORD,    # dwFlagsAndAttributes
-    ctypes.wintypes.HANDLE,   # hTemplateFile
+    ctypes.wintypes.LPCWSTR, ctypes.wintypes.DWORD, ctypes.wintypes.DWORD,
+    ctypes.c_void_p, ctypes.wintypes.DWORD, ctypes.wintypes.DWORD,
+    ctypes.wintypes.HANDLE,
 ]
 _kernel32.GetFileSize.restype = ctypes.wintypes.DWORD
-_kernel32.GetFileSize.argtypes = [ctypes.wintypes.HANDLE, ctypes.POINTER(ctypes.wintypes.DWORD)]
+_kernel32.GetFileSize.argtypes = [
+    ctypes.wintypes.HANDLE, ctypes.POINTER(ctypes.wintypes.DWORD),
+]
 _kernel32.SetFilePointer.restype = ctypes.wintypes.DWORD
-_kernel32.SetFilePointer.argtypes = [ctypes.wintypes.HANDLE, ctypes.wintypes.LONG, ctypes.POINTER(ctypes.wintypes.LONG), ctypes.wintypes.DWORD]
+_kernel32.SetFilePointer.argtypes = [
+    ctypes.wintypes.HANDLE, ctypes.wintypes.LONG,
+    ctypes.POINTER(ctypes.wintypes.LONG), ctypes.wintypes.DWORD,
+]
 _kernel32.ReadFile.restype = ctypes.wintypes.BOOL
-_kernel32.ReadFile.argtypes = [ctypes.wintypes.HANDLE, ctypes.c_void_p, ctypes.wintypes.DWORD, ctypes.POINTER(ctypes.wintypes.DWORD), ctypes.c_void_p]
+_kernel32.ReadFile.argtypes = [
+    ctypes.wintypes.HANDLE, ctypes.c_void_p, ctypes.wintypes.DWORD,
+    ctypes.POINTER(ctypes.wintypes.DWORD), ctypes.c_void_p,
+]
 _kernel32.CloseHandle.restype = ctypes.wintypes.BOOL
 _kernel32.CloseHandle.argtypes = [ctypes.wintypes.HANDLE]
-
 _INVALID_HANDLE = ctypes.wintypes.HANDLE(-1).value
 
 
 def _win32_read(path: str, offset: int = 0, size: int | None = None) -> bytes:
-    """Read bytes from a file using Win32 API with maximum sharing.
+    """Read bytes from *path* using CreateFileW with maximum sharing.
 
-    Bypasses Python's file-object layer entirely to avoid fd/handle
-    lifetime issues.  Uses ``CreateFileW`` with full sharing so the file
-    can be read while HAMLOG and Dropbox both hold it open.
+    Raises PermissionError if the file cannot be opened (e.g. another
+    process holds an exclusive lock).
     """
     handle = _kernel32.CreateFileW(
         path, _GENERIC_READ, _FILE_SHARE_ALL,
@@ -234,11 +238,11 @@ class HamlogReader:
 
     @staticmethod
     def _read_with_retry(path: str, offset: int = 0, size: int | None = None) -> bytes:
-        """Read bytes from file via Win32 shared mode, with retry."""
+        """Read bytes via Win32 shared-mode open, retrying on lock errors."""
         for attempt in range(_OPEN_RETRIES):
             try:
                 return _win32_read(path, offset, size)
-            except PermissionError:
+            except (PermissionError, OSError):
                 if attempt == _OPEN_RETRIES - 1:
                     raise
                 time.sleep(_OPEN_RETRY_DELAY)
@@ -287,7 +291,8 @@ class HamlogReader:
             return True
         except (IOError, OSError, PermissionError) as e:
             logger.error(
-                "Cannot open Hamlog.hdb (%s). Is HAMLOG started with '-S'?", e,
+                "Cannot open Hamlog.hdb (%s). Check: (1) HAMLOG started with '-S'? "
+                "(2) Dropbox sync locking the file?", e,
             )
             return False
 
