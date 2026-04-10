@@ -35,6 +35,7 @@ e.g. `Hamlogw.exe -S`. See the HAMLOG50 API documentation for details.
 import logging
 import os
 import struct
+import time
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,10 @@ DBASE_HEADER_TERMINATOR = 0x0D
 
 # Record delete marker: 0x20 = active, 0x2A = deleted
 DELETE_MARK_ACTIVE = 0x20
+
+# Retry settings for file access (Dropbox sync can briefly lock the file)
+_OPEN_RETRIES = 5
+_OPEN_RETRY_DELAY = 0.3  # seconds
 
 
 @dataclass
@@ -161,6 +166,21 @@ class HamlogReader:
     def filepath(self) -> str:
         return self._filepath
 
+    @staticmethod
+    def _open_with_retry(path: str):
+        """Open a file for binary reading, retrying on permission errors.
+
+        Dropbox (and other sync tools) briefly lock files while syncing,
+        so a single PermissionError is not fatal — just retry.
+        """
+        for attempt in range(_OPEN_RETRIES):
+            try:
+                return open(path, "rb")
+            except PermissionError:
+                if attempt == _OPEN_RETRIES - 1:
+                    raise
+                time.sleep(_OPEN_RETRY_DELAY)
+
     # ---- Header / structure ------------------------------------------------
 
     def _load_header(self) -> bool:
@@ -170,7 +190,7 @@ class HamlogReader:
         if not os.path.exists(self._filepath):
             return False
         try:
-            with open(self._filepath, "rb") as f:
+            with self._open_with_retry(self._filepath) as f:
                 head = f.read(DBASE_HEADER_BASE)
                 if len(head) < DBASE_HEADER_BASE:
                     return False
@@ -235,7 +255,7 @@ class HamlogReader:
         if not self._load_header():
             return None
         try:
-            with open(self._filepath, "rb") as f:
+            with self._open_with_retry(self._filepath) as f:
                 f.seek(self._header_len + index * self._record_size)
                 data = f.read(self._record_size)
         except (IOError, OSError, PermissionError) as e:
@@ -265,7 +285,7 @@ class HamlogReader:
         if not self._load_header():
             return records
         try:
-            with open(self._filepath, "rb") as f:
+            with self._open_with_retry(self._filepath) as f:
                 f.seek(self._header_len + start * self._record_size)
                 block = f.read((stop - start) * self._record_size)
         except (IOError, OSError, PermissionError) as e:
