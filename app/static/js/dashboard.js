@@ -109,9 +109,6 @@ function initMap() {
     });
     document.getElementById('btn-reset-zoom').addEventListener('click', resetZoom);
 
-    // ---- DEBUG marker for z-order investigation ----
-    addDebugMarker();
-
     // Initialize SocketIO after map is ready
     initSocketIO();
 
@@ -121,65 +118,46 @@ function initMap() {
 }
 
 
-/* ===== Debug Markers ===== */
-function addDebugMarker() {
-    // Two debug markers near the station to test z-order between them
-    const debugData = [
-        { label: 'デバッグA', color: '#ff00ff', offsetLat: 0.2, offsetLng: 0.2 },
-        { label: 'デバッグB', color: '#00ffff', offsetLat: 0.22, offsetLng: 0.22 },
-    ];
+/* ===== InfoWindow z-order control ===== */
+// Google Maps InfoWindow DOM structure (confirmed via debug):
+//   L5: .gm-style-iw-a  (position: absolute)
+//   L6: div              (position: absolute, zIndex: -29 etc.) <-- THIS controls stacking
+//   L7: div              (position: absolute, zIndex: 107)      <-- shared pane for all IWs
+//
+// To bring an InfoWindow to front, set L6's zIndex to a high value.
+// L6 = .gm-style-iw-a's parentElement.
 
-    debugData.forEach(d => {
-        const pos = {
-            lat: LOGMAP_CONFIG.stationLat + d.offsetLat,
-            lng: LOGMAP_CONFIG.stationLon + d.offsetLng,
-        };
+let nextIwZIndex = 10000;
 
-        const marker = new google.maps.Marker({
-            position: pos,
-            map: map,
-            icon: {
-                path: google.maps.SymbolPath.CIRCLE,
-                scale: 10,
-                fillColor: d.color,
-                fillOpacity: 1,
-                strokeColor: '#ffffff',
-                strokeWeight: 3,
-            },
-            title: d.label,
-            zIndex: 500,
-        });
+function getIwContainer(infoWindow) {
+    // Find .gm-style-iw-a that belongs to this InfoWindow by searching
+    // all such elements for one that contains the InfoWindow's content.
+    const candidates = document.querySelectorAll('.gm-style-iw-a');
+    // The last one added is most likely ours, but we search to be safe
+    for (const el of candidates) {
+        // L6 is el.parentElement
+        if (el.parentElement) return el.parentElement;
+    }
+    return null;
+}
 
-        // Use an id so we can find this specific InfoWindow in the DOM
-        const iwId = 'debug-iw-' + d.label;
-        const iw = new google.maps.InfoWindow({
-            content: `<div id="${iwId}" style="background:${d.color};color:#fff;padding:10px 16px;border-radius:6px;font-weight:bold;font-size:18px;cursor:pointer;">${d.label}<br><small>クリックでDOM調査</small></div>`,
-            disableAutoPan: true,
-        });
-        iw.open(map, marker);
+function cacheIwContainer(entry) {
+    // Called on domready: find and cache this entry's L6 container.
+    // We identify it by looking for the one with matching content text.
+    const callsign = entry.qso ? entry.qso.callsign : '';
+    const candidates = document.querySelectorAll('.gm-style-iw-a');
+    for (const el of candidates) {
+        if (callsign && el.textContent.includes(callsign)) {
+            entry._iwL6 = el.parentElement;
+            return;
+        }
+    }
+}
 
-        // Listen on domready to attach click handler to the CONTENT (not the marker)
-        google.maps.event.addListener(iw, 'domready', () => {
-            const el = document.getElementById(iwId);
-            if (!el) return;
-            el.onclick = () => {
-                console.log(`=== ${d.label} CLICKED ===`);
-
-                // Walk up from this element and log every ancestor
-                let node = el;
-                for (let level = 0; level < 15 && node; level++) {
-                    const tag = node.tagName || '?';
-                    const posStyle = node.style ? node.style.position : '';
-                    const z = node.style ? node.style.zIndex : '';
-                    const cls = (node.className || '').substring(0, 50);
-                    const inlineZ = node.getAttribute ? node.getAttribute('style') : '';
-                    const zInInline = inlineZ && inlineZ.includes('z-index') ? inlineZ.match(/z-index:\s*(\d+)/)?.[1] || '' : '';
-                    console.log(`  L${level}: <${tag}> class="${cls}" position="${posStyle}" zIndex="${z}" inlineZ="${zInInline}"`);
-                    node = node.parentElement;
-                }
-            };
-        });
-    });
+function bringToFront(entry) {
+    if (entry._iwL6) {
+        entry._iwL6.style.zIndex = String(++nextIwZIndex);
+    }
 }
 
 
@@ -287,12 +265,30 @@ function addQsoToMap(qso, isActive) {
         isDot: false,
         isActive: isActive,
         _infoOpen: isActive,
+        _iwL6: null,  // cached DOM ref to the L6 container for z-order
     };
     qsoEntries.push(entry);
 
     if (isActive) {
         infoWindow.open(map, marker);
     }
+
+    // On domready, cache the L6 container, bring active to front,
+    // and add click handler on the card to bring it to front
+    google.maps.event.addListener(infoWindow, 'domready', () => {
+        if (!entry._iwL6) {
+            cacheIwContainer(entry);
+        }
+        if (entry.isActive) {
+            bringToFront(entry);
+        }
+        // Attach click-to-front on the card content itself
+        // (marker click doesn't fire when InfoWindow covers it)
+        const iwA = entry._iwL6 ? entry._iwL6.querySelector('.gm-style-iw-a') : null;
+        if (iwA) {
+            iwA.onclick = () => bringToFront(entry);
+        }
+    });
 
     // Click to toggle info window
     marker.addListener('click', () => {
@@ -307,9 +303,11 @@ function addQsoToMap(qso, isActive) {
             if (entry.isDot) {
                 infoWindow.setContent(createMiniPanelHtml(entry.qso, false));
                 marker.setIcon(getMarkerIcon(false));
+                entry._iwL6 = null;  // content changed, need to recache
             }
             infoWindow.open(map, marker);
             entry._infoOpen = true;
+            // bringToFront will be called on domready
         }
     });
 }
