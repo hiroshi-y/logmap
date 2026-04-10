@@ -129,27 +129,19 @@ function initMap() {
 
 let nextIwZIndex = 10000;
 
+// Number of InfoWindows waiting for domready to fire
+let _pendingDomready = 0;
+
 function bringToFront(entry) {
     if (entry._iwL6) {
         entry._iwL6.style.zIndex = String(++nextIwZIndex);
     }
     // Active (yellow) card always stays on top
     if (!entry.isActive) {
-        ensureActiveOnTop();
-    }
-}
-
-function ensureActiveOnTop() {
-    // Set explicit z-index on ALL open cards (overriding Google Maps' values),
-    // then set the active card highest — same as clicking each blue card.
-    qsoEntries.forEach(entry => {
-        if (entry._iwL6 && entry._infoOpen && !entry.isActive) {
-            entry._iwL6.style.zIndex = String(++nextIwZIndex);
+        const active = qsoEntries.find(e => e.isActive && e._iwL6);
+        if (active) {
+            active._iwL6.style.zIndex = String(++nextIwZIndex);
         }
-    });
-    const active = qsoEntries.find(e => e.isActive && e._iwL6);
-    if (active) {
-        active._iwL6.style.zIndex = String(++nextIwZIndex);
     }
 }
 
@@ -222,6 +214,8 @@ function initSocketIO() {
         clearAllMarkers();
         const openCount = LOGMAP_CONFIG.openCards || 1;
         const openStart = Math.max(0, qsos.length - openCount);
+        // Count how many cards will open (need domready before raising active)
+        _pendingDomready = qsos.filter((_, i) => i >= openStart).length;
         qsos.forEach((qso, index) => {
             const isLatest = (index === qsos.length - 1);
             const showCard = (index >= openStart);
@@ -229,18 +223,16 @@ function initSocketIO() {
         });
         updateFarthestLines();
         resetZoom();
-        // After map finishes zoom/pan, raise active card above all others
-        google.maps.event.addListenerOnce(map, 'idle', ensureActiveOnTop);
         setStatus('status.monitoring');
     });
 
     socket.on('new_qso', (qso) => {
         shrinkActivePanels();
+        _pendingDomready = 1;
         addQsoToMap(qso, true);
         enforceMaxPanels();
         updateFarthestLines();
         resetZoom();
-        google.maps.event.addListenerOnce(map, 'idle', ensureActiveOnTop);
     });
 
     socket.on('stats_update', (stats) => {
@@ -315,8 +307,8 @@ function addQsoToMap(qso, isActive, showCard) {
         infoWindow.open(map, marker);
     }
 
-    // On domready: find L6 via getElementById + DOM walk-up,
-    // attach click-to-front, and always ensure active card is on top
+    // On domready: cache L6, attach click handler.
+    // When the last pending card is ready, "click" the active card to raise it.
     google.maps.event.addListener(infoWindow, 'domready', () => {
         const panelEl = document.getElementById(entry._panelId);
         if (panelEl) {
@@ -330,8 +322,14 @@ function addQsoToMap(qso, isActive, showCard) {
             panelEl.style.cursor = 'pointer';
             panelEl.onclick = () => bringToFront(entry);
         }
-        // Every domready: ensure active card stays on top
-        ensureActiveOnTop();
+        // After the last card finishes rendering, raise the active card
+        if (_pendingDomready > 0) {
+            _pendingDomready--;
+            if (_pendingDomready === 0) {
+                const active = qsoEntries.find(e => e.isActive);
+                if (active) bringToFront(active);
+            }
+        }
     });
 
     // Click marker to toggle info window
