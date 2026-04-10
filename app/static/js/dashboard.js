@@ -230,15 +230,8 @@ function addQsoToMap(qso, isActive) {
     });
 
     if (isActive) {
-        // Close and re-open all visible InfoWindows so that this
-        // (the active one, opened last) renders on top of all others.
-        qsoEntries.forEach(e => {
-            if (e._infoOpen && e.infoWindow !== infoWindow) {
-                e.infoWindow.close();
-                e.infoWindow.open(map, e.marker);
-            }
-        });
         infoWindow.open(map, marker);
+        bringInfoWindowToFront(infoWindow);
     }
 
     // Store entry
@@ -271,36 +264,22 @@ function addQsoToMap(qso, isActive) {
                 infoWindow.setContent(content);
                 marker.setIcon(getMarkerIcon(false));
             }
-            // Close then re-open: Google Maps renders the last-opened
-            // InfoWindow on top, so this brings it to the front.
-            infoWindow.close();
             infoWindow.open(map, marker);
+            bringInfoWindowToFront(infoWindow);
             entry._infoOpen = true;
         }
     });
 }
 
-function createMiniPanelHtml(qso, isActive) {
-    const sizeClass = isActive ? 'active new' : 'past';
-    const distStr = qso.distance_km.toLocaleString(undefined, { maximumFractionDigits: 0 });
+let panelIdCounter = 0;
 
-    // Inline the flash animation so it works inside Google Maps' InfoWindow DOM
-    const flashStyle = isActive ? `
-        <style>
-            @keyframes flashBorder {
-                0%, 100% { box-shadow: 0 0 8px 2px rgba(255, 200, 0, 0.3); }
-                50%      { box-shadow: 0 0 16px 6px rgba(255, 200, 0, 1); }
-            }
-            .mini-panel.active {
-                animation: flashBorder 1.5s ease-in-out infinite;
-                box-shadow: 0 0 8px 2px rgba(255, 200, 0, 0.8);
-            }
-        </style>
-    ` : '';
+function createMiniPanelHtml(qso, isActive) {
+    const sizeClass = isActive ? 'active' : 'past';
+    const distStr = qso.distance_km.toLocaleString(undefined, { maximumFractionDigits: 0 });
+    const panelId = `mp-${++panelIdCounter}`;
 
     return `
-        ${flashStyle}
-        <div class="mini-panel ${sizeClass}">
+        <div class="mini-panel ${sizeClass}" data-panel-id="${panelId}">
             <div class="mp-callsign">${escapeHtml(qso.callsign)}</div>
             <div class="mp-location">${escapeHtml(qso.city_name)}</div>
             <div class="mp-info">
@@ -309,6 +288,27 @@ function createMiniPanelHtml(qso, isActive) {
             </div>
         </div>
     `;
+}
+
+function bringInfoWindowToFront(infoWindow) {
+    google.maps.event.addListenerOnce(infoWindow, 'domready', () => {
+        // Find the mini-panel element just rendered
+        const panels = document.querySelectorAll('.mini-panel[data-panel-id]');
+        const panel = panels[panels.length - 1];
+        if (!panel) return;
+        // Walk up the DOM to the InfoWindow's outermost container
+        let node = panel;
+        while (node && node.parentElement) {
+            node = node.parentElement;
+            // The outermost positioned wrapper before the map pane
+            if (node.style && node.style.position === 'absolute'
+                && node.parentElement && node.parentElement.style
+                && node.parentElement.style.position === 'absolute') {
+                node.style.zIndex = String(++nextZIndex);
+                break;
+            }
+        }
+    });
 }
 
 function getMarkerIcon(isActive) {

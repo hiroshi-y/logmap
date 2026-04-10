@@ -216,12 +216,15 @@ body {
     border-radius: 6px 6px 0 0;
 }
 
-/* Active (latest) QSO: bright yellow with flashing border */
+/* Active (latest) QSO: bright yellow with flashing border.
+   Uses fadeInUp first (0.5s), then flashBorder loops forever.
+   Both must be in ONE animation shorthand so .new doesn't override. */
 .mini-panel.active {
     transform: scale(1);
     opacity: 1;
     box-shadow: 0 0 8px 2px rgba(255, 200, 0, 0.8);
-    animation: flashBorder 1.5s ease-in-out infinite;
+    animation: fadeInUp 0.5s ease-out,
+               flashBorder 1.5s ease-in-out 0.5s infinite;
 }
 
 @keyframes flashBorder {
@@ -327,9 +330,7 @@ body {
     }
 }
 
-.mini-panel.new {
-    animation: fadeInUp 0.5s ease-out;
-}
+/* .mini-panel.new animation is now combined into .mini-panel.active */
 
 @keyframes pulse {
     0%, 100% { transform: scale(1); }
