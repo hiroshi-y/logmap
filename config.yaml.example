@@ -19,6 +19,8 @@ hamlog:
   data_dir: "C:\\Hamlog\\Data"
   # Main database file name
   db_file: "Hamlog.hdb"
+  # Master file (CODE -> QTH/lat/lon). Authoritative for HAMLOG CODEs.
+  mst_file: "Hamlog.mst"
   # Polling interval in seconds
   poll_interval: 3
 
@@ -35,6 +37,8 @@ jcc:
 
 # Dashboard settings
 dashboard:
+  # How many past QSOs to preload on startup
+  initial_qso_count: 1
   # Maximum number of mini-panels before converting to dots
   max_mini_panels: 20
   # Language: "ja" or "en"

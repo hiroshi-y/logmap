@@ -12,6 +12,7 @@ from .i18n import set_language, get_all_translations, get_current_language
 from .services.cty_parser import CtyDat
 from .services.jcc_resolver import JccResolver
 from .services.location_resolver import LocationResolver
+from .services.hamlog_mst import HamlogMst
 from .services.hamlog_reader import HamlogReader
 from .services.log_monitor import LogMonitor, QsoEvent
 
@@ -85,6 +86,16 @@ def create_app(config_path: str = "config.yaml") -> Flask:
         jcc_path = os.path.join(base_dir, jcc_path)
     jcc.load_from_file(jcc_path)
 
+    # HAMLOG reader + master file
+    hamlog_cfg = config.get("hamlog", {})
+    data_dir = hamlog_cfg.get("data_dir", "C:\\Hamlog\\Data")
+    hdb_path = os.path.join(data_dir, hamlog_cfg.get("db_file", "Hamlog.hdb"))
+    mst_path = os.path.join(data_dir, hamlog_cfg.get("mst_file", "Hamlog.mst"))
+    reader = HamlogReader(hdb_path)
+
+    mst = HamlogMst()
+    mst.load(mst_path)
+
     # Location resolver
     station = config.get("station", {})
     resolver = LocationResolver(
@@ -92,15 +103,8 @@ def create_app(config_path: str = "config.yaml") -> Flask:
         jcc=jcc,
         station_lat=station.get("latitude", 35.6812),
         station_lon=station.get("longitude", 139.7671),
+        mst=mst,
     )
-
-    # HAMLOG reader
-    hamlog_cfg = config.get("hamlog", {})
-    hdb_path = os.path.join(
-        hamlog_cfg.get("data_dir", "C:\\Hamlog\\Data"),
-        hamlog_cfg.get("db_file", "Hamlog50.hdb"),
-    )
-    reader = HamlogReader(hdb_path)
 
     # Log monitor
     def on_new_qso(event: QsoEvent):
@@ -196,6 +200,6 @@ def register_socket_events() -> None:
 def start_monitoring() -> None:
     """Start the log monitor (call after app is created)."""
     if monitor:
-        # Load initial QSOs for display
-        monitor.load_initial_qsos(20)
+        initial = config.get("dashboard", {}).get("initial_qso_count", 1)
+        monitor.load_initial_qsos(initial)
         monitor.start()

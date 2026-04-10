@@ -9,8 +9,9 @@ hiroshi-y's live file):
 
     offset  len type name
        0      1   -   delete mark (0x20 = active, 0x2A = deleted)
-       1      6   C   CALLS
-       7     14   C   IGN (ignored)
+       1      6   C   CALLS   (first 6 chars, indexed)
+       7     14   C   IGN     (rest of the 20-byte callsign column,
+                               contains portable suffix like "/3")
       21      4   B   DATE   [century, yy, mm, dd]
       25      2   B   TIME   [hh, mm | 0x80 for UTC]
       27      6   C   CODE   (JCC/JCG)
@@ -293,7 +294,17 @@ class HamlogReader:
         if not data or data[0] != DELETE_MARK_ACTIVE:
             return None
 
-        callsign = _decode_ascii(self._get(data, "CALLS"))
+        # HAMLOG splits the 20-byte callsign column into CALLS(6) + IGN(14)
+        # for indexing, but the full callsign including portable suffix
+        # ("JO3OPP/3") lives across both fields. Read the two contiguously.
+        calls_loc = self._field("CALLS")
+        ign_loc = self._field("IGN")
+        if calls_loc and ign_loc:
+            off = calls_loc[0]
+            total = calls_loc[1] + ign_loc[1]
+            callsign = _decode_ascii(data[off:off + total])
+        else:
+            callsign = _decode_ascii(self._get(data, "CALLS"))
         if not callsign:
             return None
 
