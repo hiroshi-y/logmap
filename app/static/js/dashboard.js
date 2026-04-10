@@ -11,32 +11,22 @@ let socket;
 let translations = LOGMAP_CONFIG.translations;
 let stationMarker;
 
-// QSO markers and info windows
-const qsoEntries = [];      // Array of { marker, infoWindow, qso, isDot }
+const qsoEntries = [];
 const MAX_MINI_PANELS = LOGMAP_CONFIG.maxMiniPanels;
 
-// Track today's date for midnight rollover
-let todayDateStr = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
+let todayDateStr = new Date().toLocaleDateString('en-CA');
 
 
 /* ===== Clock ===== */
 function updateClock() {
     const now = new Date();
 
-    // Local time
-    const localStr = now.toLocaleTimeString('ja-JP', {
-        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
-    });
-    document.getElementById('clock-local-time').textContent = localStr;
+    document.getElementById('clock-local-time').textContent =
+        now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 
-    // UTC
-    const utcStr = now.toLocaleTimeString('ja-JP', {
-        hour: '2-digit', minute: '2-digit', second: '2-digit',
-        hour12: false, timeZone: 'UTC'
-    });
-    document.getElementById('clock-utc-time').textContent = utcStr;
+    document.getElementById('clock-utc-time').textContent =
+        now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'UTC' });
 
-    // Check midnight rollover
     const currentDate = now.toLocaleDateString('en-CA');
     if (currentDate !== todayDateStr) {
         todayDateStr = currentDate;
@@ -45,13 +35,10 @@ function updateClock() {
 }
 
 function handleMidnightRollover() {
-    const dotsToRemove = qsoEntries.filter(e => e.isDot);
-    dotsToRemove.forEach(entry => {
-        entry.marker.setMap(null);
-        if (entry.infoWindow) entry.infoWindow.close();
-    });
     for (let i = qsoEntries.length - 1; i >= 0; i--) {
         if (qsoEntries[i].isDot) {
+            qsoEntries[i].marker.setMap(null);
+            qsoEntries[i].infoWindow.close();
             qsoEntries.splice(i, 1);
         }
     }
@@ -64,10 +51,7 @@ function initMap() {
     if (window._mapInitialized) return;
     window._mapInitialized = true;
 
-    const stationPos = {
-        lat: LOGMAP_CONFIG.stationLat,
-        lng: LOGMAP_CONFIG.stationLon
-    };
+    const stationPos = { lat: LOGMAP_CONFIG.stationLat, lng: LOGMAP_CONFIG.stationLon };
 
     map = new google.maps.Map(document.getElementById('map'), {
         center: stationPos,
@@ -79,7 +63,6 @@ function initMap() {
         gestureHandling: 'greedy',
     });
 
-    // Station marker (home position)
     stationMarker = new google.maps.Marker({
         position: stationPos,
         map: map,
@@ -95,95 +78,75 @@ function initMap() {
         zIndex: 1000,
     });
 
-    // Station label
     new google.maps.InfoWindow({
         content: `<div style="background:#1a1a2e;color:#fff;padding:4px 8px;border-radius:4px;font-weight:bold;font-size:14px;">${LOGMAP_CONFIG.stationCall}</div>`,
         disableAutoPan: true,
     }).open(map, stationMarker);
 
-    // Map controls
-    document.getElementById('btn-zoom-in').addEventListener('click', () => {
-        map.setZoom(map.getZoom() + 1);
-    });
-    document.getElementById('btn-zoom-out').addEventListener('click', () => {
-        map.setZoom(map.getZoom() - 1);
-    });
+    document.getElementById('btn-zoom-in').addEventListener('click', () => map.setZoom(map.getZoom() + 1));
+    document.getElementById('btn-zoom-out').addEventListener('click', () => map.setZoom(map.getZoom() - 1));
     document.getElementById('btn-reset-zoom').addEventListener('click', resetZoom);
 
-    // Debug button: test bringToFront on active card
-    const dbgBtn = document.createElement('button');
-    dbgBtn.textContent = 'DBG: Raise Active';
-    dbgBtn.style.cssText = 'position:fixed;top:55px;left:10px;z-index:9999;padding:8px 12px;background:#ff0;color:#000;font-weight:bold;border:2px solid #000;cursor:pointer;font-size:14px;';
-    dbgBtn.onclick = () => {
-        const active = qsoEntries.find(e => e.isActive);
-        if (!active) { console.log('DBG: no active entry'); return; }
-        console.log('DBG: active._iwL6 =', active._iwL6);
-        console.log('DBG: active._iwL6.style.zIndex BEFORE =', active._iwL6 ? active._iwL6.style.zIndex : 'N/A');
-        console.log('DBG: active._infoOpen =', active._infoOpen);
-        // Log all open cards' L6 z-index
-        qsoEntries.filter(e => e._infoOpen && e._iwL6).forEach(e => {
-            console.log(`DBG: ${e.qso.callsign} isActive=${e.isActive} L6.zIndex=${e._iwL6.style.zIndex}`);
-        });
-        // Now do the same thing as clicking a blue card
-        bringToFront(active);
-        console.log('DBG: active._iwL6.style.zIndex AFTER =', active._iwL6 ? active._iwL6.style.zIndex : 'N/A');
-    };
-    document.body.appendChild(dbgBtn);
-
-    // Initialize SocketIO after map is ready
     initSocketIO();
-
-    // Start clock
     updateClock();
     setInterval(updateClock, 1000);
 }
 
 
-/* ===== InfoWindow z-order control ===== */
-// Google Maps InfoWindow DOM structure (confirmed via debug):
-//   L5: .gm-style-iw-a  (position: absolute)
-//   L6: div              (position: absolute, zIndex controls stacking)
-//   L7: div              (position: absolute, zIndex: 107, shared pane)
-// To bring an InfoWindow to front, set L6's zIndex to a high value.
-// L6 = .gm-style-iw-a.parentElement
+/* ===== InfoWindow z-order ===== */
+// Google Maps manages InfoWindow stacking via a wrapper div (L6) whose
+// z-index it reassigns on every render cycle (open, drag, zoom).
+// L6 = document.querySelector('.gm-style-iw-a').parentElement
+//
+// For the active (yellow) card, a MutationObserver overrides Google's
+// z-index with ACTIVE_ZINDEX whenever it changes.
+// For other cards, bringToFront sets an incrementing z-index on click.
 
+const ACTIVE_ZINDEX = 99999;
 let nextIwZIndex = 10000;
 
 function bringToFront(entry) {
     if (entry._iwL6) {
         entry._iwL6.style.zIndex = String(++nextIwZIndex);
     }
-    // Active (yellow) card always stays on top
-    if (!entry.isActive) {
-        const active = qsoEntries.find(e => e.isActive && e._iwL6);
-        if (active) {
-            active._iwL6.style.zIndex = String(++nextIwZIndex);
+}
+
+function startActiveZIndexGuard(entry) {
+    if (!entry._iwL6 || entry._zObserver) return;
+    entry._iwL6.style.zIndex = String(ACTIVE_ZINDEX);
+    entry._zObserver = new MutationObserver(() => {
+        if (parseInt(entry._iwL6.style.zIndex) !== ACTIVE_ZINDEX) {
+            entry._iwL6.style.zIndex = String(ACTIVE_ZINDEX);
         }
+    });
+    entry._zObserver.observe(entry._iwL6, { attributes: true, attributeFilter: ['style'] });
+}
+
+function stopActiveZIndexGuard(entry) {
+    if (entry._zObserver) {
+        entry._zObserver.disconnect();
+        entry._zObserver = null;
     }
 }
 
 
 /* ===== Great Circle Lines to Top-3 Farthest ===== */
-const farthestLines = [];  // Array of google.maps.Polyline
-const FARTHEST_COLORS = ['#ff4444', '#ff8800', '#ffcc00']; // 1st, 2nd, 3rd
+const farthestLines = [];
+const FARTHEST_COLORS = ['#ff4444', '#ff8800', '#ffcc00'];
 
 function updateFarthestLines() {
-    // Remove old lines
     farthestLines.forEach(line => line.setMap(null));
     farthestLines.length = 0;
-
     if (!map) return;
 
     const stationPos = { lat: LOGMAP_CONFIG.stationLat, lng: LOGMAP_CONFIG.stationLon };
-
-    // Top 3 farthest QSOs by distance
-    const sorted = qsoEntries
+    const top3 = qsoEntries
         .filter(e => e.qso.distance_km > 0)
         .sort((a, b) => b.qso.distance_km - a.qso.distance_km)
         .slice(0, 3);
 
-    sorted.forEach((entry, i) => {
-        const line = new google.maps.Polyline({
+    top3.forEach((entry, i) => {
+        farthestLines.push(new google.maps.Polyline({
             path: [stationPos, entry.marker.getPosition()],
             geodesic: true,
             strokeColor: FARTHEST_COLORS[i],
@@ -191,8 +154,7 @@ function updateFarthestLines() {
             strokeWeight: i === 0 ? 3 : 2,
             map: map,
             zIndex: 10,
-        });
-        farthestLines.push(line);
+        }));
     });
 }
 
@@ -219,40 +181,20 @@ function getMapDarkStyle() {
 function initSocketIO() {
     socket = io();
 
-    socket.on('connect', () => {
-        setStatus('status.connected');
-    });
-
-    socket.on('disconnect', () => {
-        setStatus('status.disconnected');
-    });
+    socket.on('connect', () => setStatus('status.connected'));
+    socket.on('disconnect', () => setStatus('status.disconnected'));
 
     socket.on('initial_qsos', (qsos) => {
         clearAllMarkers();
         const openCount = LOGMAP_CONFIG.openCards || 1;
         const openStart = Math.max(0, qsos.length - openCount);
-        // 1) Add all past (blue) cards and open their InfoWindows
         qsos.forEach((qso, index) => {
-            if (index === qsos.length - 1) return; // active handled below
+            const isLatest = (index === qsos.length - 1);
             const showCard = (index >= openStart);
-            addQsoToMap(qso, false, showCard);
+            addQsoToMap(qso, isLatest, showCard);
         });
-        // 2) Add active (yellow) card but do NOT open its InfoWindow yet
-        if (qsos.length > 0) {
-            addQsoToMap(qsos[qsos.length - 1], true, false);
-        }
         updateFarthestLines();
         resetZoom();
-        // 3) After the map finishes rendering (idle), open the active
-        //    card's InfoWindow — it will be the last one Google opens,
-        //    so it naturally renders on top of all other cards.
-        google.maps.event.addListenerOnce(map, 'idle', () => {
-            const activeEntry = qsoEntries.find(e => e.isActive);
-            if (activeEntry) {
-                activeEntry.infoWindow.open(map, activeEntry.marker);
-                activeEntry._infoOpen = true;
-            }
-        });
         setStatus('status.monitoring');
     });
 
@@ -264,9 +206,7 @@ function initSocketIO() {
         resetZoom();
     });
 
-    socket.on('stats_update', (stats) => {
-        updateStats(stats);
-    });
+    socket.on('stats_update', updateStats);
 
     socket.on('language_changed', (data) => {
         translations = data.translations;
@@ -277,14 +217,13 @@ function initSocketIO() {
 
 /* ===== QSO Map Management ===== */
 function jitterPosition(lat, lng) {
-    const threshold = 0.002; // ~200m
+    const threshold = 0.002;
     const overlap = qsoEntries.some(e => {
         const pos = e.marker.getPosition();
         return Math.abs(pos.lat() - lat) < threshold
             && Math.abs(pos.lng() - lng) < threshold;
     });
     if (!overlap) return { lat, lng };
-    // Random offset 0.01–0.02 deg (~1–2km) in a random direction
     const angle = Math.random() * 2 * Math.PI;
     const dist = 0.01 + Math.random() * 0.01;
     return { lat: lat + dist * Math.sin(angle), lng: lng + dist * Math.cos(angle) };
@@ -293,13 +232,11 @@ function jitterPosition(lat, lng) {
 let panelIdCounter = 0;
 
 function addQsoToMap(qso, isActive, showCard) {
-    // showCard: whether to open the InfoWindow (defaults to isActive)
     if (showCard === undefined) showCard = isActive;
 
     const position = jitterPosition(qso.latitude, qso.longitude);
     const panelId = 'qso-panel-' + (++panelIdCounter);
 
-    // Create marker
     const marker = new google.maps.Marker({
         position: position,
         map: map,
@@ -311,24 +248,20 @@ function addQsoToMap(qso, isActive, showCard) {
         marker.setAnimation(google.maps.Animation.DROP);
     }
 
-    // Create info window with mini-panel content
-    const content = createMiniPanelHtml(qso, isActive, panelId);
     const infoWindow = new google.maps.InfoWindow({
-        content: content,
+        content: createMiniPanelHtml(qso, isActive, panelId),
         disableAutoPan: true,
         pixelOffset: new google.maps.Size(0, -5),
     });
 
-    // Store entry
     const entry = {
-        marker: marker,
-        infoWindow: infoWindow,
-        qso: qso,
+        marker, infoWindow, qso,
         isDot: false,
         isActive: isActive,
         _infoOpen: showCard,
         _panelId: panelId,
         _iwL6: null,
+        _zObserver: null,
     };
     qsoEntries.push(entry);
 
@@ -336,7 +269,8 @@ function addQsoToMap(qso, isActive, showCard) {
         infoWindow.open(map, marker);
     }
 
-    // On domready: cache L6, attach click-to-front handler
+    // On domready: cache the L6 wrapper, attach click handler,
+    // and start the z-index guard for the active card.
     google.maps.event.addListener(infoWindow, 'domready', () => {
         const panelEl = document.getElementById(entry._panelId);
         if (panelEl) {
@@ -350,26 +284,11 @@ function addQsoToMap(qso, isActive, showCard) {
             panelEl.style.cursor = 'pointer';
             panelEl.onclick = () => bringToFront(entry);
         }
-        // For the active card, watch L6 for Google Maps overwriting z-index.
-        // Google adjusts z-index after domready and on every drag/zoom.
-        // MutationObserver catches and overrides it until the card is
-        // no longer active (disconnected in shrinkActivePanels).
-        if (entry.isActive && entry._iwL6 && !entry._zObserver) {
-            const targetZ = ++nextIwZIndex;
-            entry._iwL6.style.zIndex = String(targetZ);
-            entry._zObserver = new MutationObserver(() => {
-                const cur = parseInt(entry._iwL6.style.zIndex) || 0;
-                if (cur < targetZ) {
-                    entry._iwL6.style.zIndex = String(targetZ);
-                }
-            });
-            entry._zObserver.observe(entry._iwL6, {
-                attributes: true, attributeFilter: ['style']
-            });
+        if (entry.isActive) {
+            startActiveZIndexGuard(entry);
         }
     });
 
-    // Click marker to toggle info window
     marker.addListener('click', () => {
         if (entry._infoOpen) {
             infoWindow.close();
@@ -390,15 +309,14 @@ function addQsoToMap(qso, isActive, showCard) {
 }
 
 function createMiniPanelHtml(qso, isActive, panelId) {
-    const sizeClass = isActive ? 'active' : 'past';
-    const distStr = qso.distance_km.toLocaleString(undefined, { maximumFractionDigits: 0 });
-
+    const cls = isActive ? 'active' : 'past';
+    const dist = qso.distance_km.toLocaleString(undefined, { maximumFractionDigits: 0 });
     return `
-        <div id="${panelId}" class="mini-panel ${sizeClass}">
+        <div id="${panelId}" class="mini-panel ${cls}">
             <div class="mp-callsign">${escapeHtml(qso.callsign)}</div>
             <div class="mp-location">${escapeHtml(qso.city_name)}</div>
             <div class="mp-info">
-                <span class="mp-distance">${distStr} km</span>
+                <span class="mp-distance">${dist} km</span>
                 <span class="mp-band">${escapeHtml(qso.band)} ${escapeHtml(qso.mode)}</span>
             </div>
         </div>
@@ -406,45 +324,20 @@ function createMiniPanelHtml(qso, isActive, panelId) {
 }
 
 function getMarkerIcon(isActive) {
-    if (isActive) {
-        return {
-            path: google.maps.SymbolPath.CIRCLE,
-            scale: 8,
-            fillColor: '#00e676',
-            fillOpacity: 1,
-            strokeColor: '#ffffff',
-            strokeWeight: 2,
-        };
-    }
-    return {
-        path: google.maps.SymbolPath.CIRCLE,
-        scale: 6,
-        fillColor: '#ffc107',
-        fillOpacity: 0.9,
-        strokeColor: '#ffffff',
-        strokeWeight: 1,
-    };
+    return isActive
+        ? { path: google.maps.SymbolPath.CIRCLE, scale: 8, fillColor: '#00e676', fillOpacity: 1, strokeColor: '#ffffff', strokeWeight: 2 }
+        : { path: google.maps.SymbolPath.CIRCLE, scale: 6, fillColor: '#ffc107', fillOpacity: 0.9, strokeColor: '#ffffff', strokeWeight: 1 };
 }
 
 function getDotIcon() {
-    return {
-        path: google.maps.SymbolPath.CIRCLE,
-        scale: 3,
-        fillColor: '#888888',
-        fillOpacity: 0.6,
-        strokeColor: '#aaaaaa',
-        strokeWeight: 1,
-    };
+    return { path: google.maps.SymbolPath.CIRCLE, scale: 3, fillColor: '#888888', fillOpacity: 0.6, strokeColor: '#aaaaaa', strokeWeight: 1 };
 }
 
 function shrinkActivePanels() {
     qsoEntries.forEach(entry => {
         if (entry.isActive && !entry.isDot) {
             entry.isActive = false;
-            if (entry._zObserver) {
-                entry._zObserver.disconnect();
-                entry._zObserver = null;
-            }
+            stopActiveZIndexGuard(entry);
             entry.marker.setIcon(getMarkerIcon(false));
             entry.marker.setZIndex(500);
             entry.infoWindow.setContent(createMiniPanelHtml(entry.qso, false, entry._panelId));
@@ -455,22 +348,20 @@ function shrinkActivePanels() {
 function enforceMaxPanels() {
     const panelEntries = qsoEntries.filter(e => !e.isDot);
     const excess = panelEntries.length - MAX_MINI_PANELS;
-
-    if (excess > 0) {
-        for (let i = 0; i < excess; i++) {
-            const entry = panelEntries[i];
-            entry.isDot = true;
-            entry.isActive = false;
-            entry._infoOpen = false;
-            entry.infoWindow.close();
-            entry.marker.setIcon(getDotIcon());
-            entry.marker.setZIndex(100);
-        }
+    for (let i = 0; i < excess; i++) {
+        const entry = panelEntries[i];
+        entry.isDot = true;
+        entry.isActive = false;
+        entry._infoOpen = false;
+        entry.infoWindow.close();
+        entry.marker.setIcon(getDotIcon());
+        entry.marker.setZIndex(100);
     }
 }
 
 function clearAllMarkers() {
     qsoEntries.forEach(entry => {
+        stopActiveZIndexGuard(entry);
         entry.marker.setMap(null);
         entry.infoWindow.close();
     });
@@ -480,27 +371,17 @@ function clearAllMarkers() {
 }
 
 
-/* ===== Zoom Management ===== */
+/* ===== Zoom ===== */
 function resetZoom() {
     if (!map) return;
-
     const bounds = new google.maps.LatLngBounds();
-    bounds.extend({
-        lat: LOGMAP_CONFIG.stationLat,
-        lng: LOGMAP_CONFIG.stationLon,
-    });
-
-    qsoEntries.forEach(entry => {
-        bounds.extend(entry.marker.getPosition());
-    });
+    bounds.extend({ lat: LOGMAP_CONFIG.stationLat, lng: LOGMAP_CONFIG.stationLon });
+    qsoEntries.forEach(entry => bounds.extend(entry.marker.getPosition()));
 
     if (qsoEntries.length > 0) {
         map.fitBounds(bounds, { top: 60, bottom: 60, left: 40, right: 60 });
     } else {
-        map.setCenter({
-            lat: LOGMAP_CONFIG.stationLat,
-            lng: LOGMAP_CONFIG.stationLon,
-        });
+        map.setCenter({ lat: LOGMAP_CONFIG.stationLat, lng: LOGMAP_CONFIG.stationLon });
         map.setZoom(6);
     }
 }
@@ -511,19 +392,15 @@ function updateStats(stats) {
     document.getElementById('stats-total').textContent = stats.total_qsos || 0;
     document.getElementById('stats-farthest-call').textContent = stats.farthest_call || '-';
     document.getElementById('stats-farthest-location').textContent = stats.farthest_location || '-';
-
     const dist = stats.farthest_distance || 0;
-    const distStr = dist > 0
-        ? `${dist.toLocaleString(undefined, { maximumFractionDigits: 0 })} km`
-        : '- km';
-    document.getElementById('stats-farthest-distance').textContent = distStr;
+    document.getElementById('stats-farthest-distance').textContent =
+        dist > 0 ? `${dist.toLocaleString(undefined, { maximumFractionDigits: 0 })} km` : '- km';
 }
 
 
 /* ===== i18n ===== */
 function setStatus(key) {
-    const el = document.getElementById('status-text');
-    el.textContent = getTranslation(key);
+    document.getElementById('status-text').textContent = getTranslation(key);
 }
 
 function getTranslation(key) {
@@ -541,17 +418,14 @@ function getTranslation(key) {
 
 function applyTranslations() {
     document.querySelectorAll('[data-i18n]').forEach(el => {
-        const key = el.getAttribute('data-i18n');
-        el.textContent = getTranslation(key);
+        el.textContent = getTranslation(el.getAttribute('data-i18n'));
     });
     document.querySelectorAll('[data-i18n-title]').forEach(el => {
-        const key = el.getAttribute('data-i18n-title');
-        el.title = getTranslation(key);
+        el.title = getTranslation(el.getAttribute('data-i18n-title'));
     });
     document.title = getTranslation('app_title');
 }
 
-// Language switcher
 document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.lang-btn').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -559,7 +433,7 @@ document.addEventListener('DOMContentLoaded', () => {
             document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             if (socket && socket.connected) {
-                socket.emit('change_language', { lang: lang });
+                socket.emit('change_language', { lang });
             }
         });
     });
