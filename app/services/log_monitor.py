@@ -65,7 +65,7 @@ class LogMonitor:
 
     def start(self) -> None:
         """Start monitoring in a background thread."""
-        if self._running:
+        if self._thread and self._thread.is_alive():
             return
 
         # Initialize with current record count
