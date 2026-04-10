@@ -216,16 +216,32 @@ body {
     border-radius: 6px 6px 0 0;
 }
 
+/* Active (latest) QSO: bright yellow */
 .mini-panel.active {
     transform: scale(1);
     opacity: 1;
 }
 
+/* Past QSOs: same size, muted blue-grey tint */
+.mini-panel.past {
+    background: rgba(180, 200, 220, 0.92);
+    border-color: rgba(120, 150, 180, 0.6);
+    opacity: 0.92;
+}
+
+.mini-panel.past::before {
+    background: #7baed4;
+}
+
+/* Legacy .small kept for backwards compat but no longer shrinks */
 .mini-panel.small {
-    transform: scale(0.7);
-    opacity: 0.85;
-    min-width: 120px;
-    padding: 6px 10px;
+    background: rgba(180, 200, 220, 0.92);
+    border-color: rgba(120, 150, 180, 0.6);
+    opacity: 0.92;
+}
+
+.mini-panel.small::before {
+    background: #7baed4;
 }
 
 .mini-panel .mp-callsign {
@@ -235,8 +251,9 @@ body {
     letter-spacing: 1px;
 }
 
+.mini-panel.past .mp-callsign,
 .mini-panel.small .mp-callsign {
-    font-size: 14px;
+    font-size: 20px;
 }
 
 .mini-panel .mp-location {
@@ -245,8 +262,9 @@ body {
     margin-top: 2px;
 }
 
+.mini-panel.past .mp-location,
 .mini-panel.small .mp-location {
-    font-size: 11px;
+    font-size: 14px;
 }
 
 .mini-panel .mp-info {
@@ -257,8 +275,9 @@ body {
     color: #666;
 }
 
+.mini-panel.past .mp-info,
 .mini-panel.small .mp-info {
-    font-size: 10px;
+    font-size: 13px;
 }
 
 .mini-panel .mp-distance {

@@ -35,7 +35,6 @@ e.g. `Hamlogw.exe -S`. See the HAMLOG50 API documentation for details.
 import ctypes
 import ctypes.wintypes
 import logging
-import msvcrt
 import os
 import struct
 import time
@@ -56,21 +55,21 @@ DELETE_MARK_ACTIVE = 0x20
 _OPEN_RETRIES = 5
 _OPEN_RETRY_DELAY = 0.3  # seconds
 
-# Windows API constants for CreateFileW
+# Windows API constants
 _GENERIC_READ = 0x80000000
 _FILE_SHARE_ALL = 0x07  # FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE
 _OPEN_EXISTING = 3
+_FILE_BEGIN = 0
 _INVALID_HANDLE = ctypes.c_void_p(-1).value
 _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 
 
-def _open_shared(path: str):
-    """Open a file for reading with maximum sharing flags via Win32 API.
+def _win32_read(path: str, offset: int = 0, size: int | None = None) -> bytes:
+    """Read bytes from a file using Win32 API with maximum sharing.
 
-    Python's built-in ``open()`` uses ``_SH_DENYNO`` which *should* share,
-    but in practice HAMLOG + Dropbox still block it.  ``CreateFileW`` with
-    ``FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE`` is the most
-    permissive combination Windows supports.
+    Bypasses Python's file-object layer entirely to avoid fd/handle
+    lifetime issues.  Uses ``CreateFileW`` with full sharing so the file
+    can be read while HAMLOG and Dropbox both hold it open.
     """
     handle = _kernel32.CreateFileW(
         str(path), _GENERIC_READ, _FILE_SHARE_ALL,
@@ -81,8 +80,20 @@ def _open_shared(path: str):
         raise PermissionError(
             f"CreateFileW failed for {path} (win32 error {err})"
         )
-    fd = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
-    return os.fdopen(fd, "rb")
+    try:
+        if size is None:
+            size = _kernel32.GetFileSize(handle, None)
+            if size == 0xFFFFFFFF:
+                return b""
+            size = max(0, size - offset)
+        if offset:
+            _kernel32.SetFilePointer(handle, offset, None, _FILE_BEGIN)
+        buf = ctypes.create_string_buffer(size)
+        bytes_read = ctypes.wintypes.DWORD(0)
+        _kernel32.ReadFile(handle, buf, size, ctypes.byref(bytes_read), None)
+        return buf.raw[: bytes_read.value]
+    finally:
+        _kernel32.CloseHandle(handle)
 
 
 @dataclass
@@ -198,19 +209,16 @@ class HamlogReader:
         return self._filepath
 
     @staticmethod
-    def _open_with_retry(path: str):
-        """Open a file for binary reading via Win32 shared mode, with retry.
-
-        Uses CreateFileW for maximum sharing compatibility, and retries on
-        transient PermissionErrors (e.g. Dropbox sync locking the file).
-        """
+    def _read_with_retry(path: str, offset: int = 0, size: int | None = None) -> bytes:
+        """Read bytes from file via Win32 shared mode, with retry."""
         for attempt in range(_OPEN_RETRIES):
             try:
-                return _open_shared(path)
+                return _win32_read(path, offset, size)
             except PermissionError:
                 if attempt == _OPEN_RETRIES - 1:
                     raise
                 time.sleep(_OPEN_RETRY_DELAY)
+        return b""
 
     # ---- Header / structure ------------------------------------------------
 
@@ -221,30 +229,28 @@ class HamlogReader:
         if not os.path.exists(self._filepath):
             return False
         try:
-            with self._open_with_retry(self._filepath) as f:
-                head = f.read(DBASE_HEADER_BASE)
-                if len(head) < DBASE_HEADER_BASE:
-                    return False
+            data = self._read_with_retry(self._filepath)
+            if len(data) < DBASE_HEADER_BASE:
+                return False
 
-                # offset 8: header length, 10: record size (both uint16 LE)
-                header_len = struct.unpack_from("<H", head, 8)[0]
-                record_size = struct.unpack_from("<H", head, 10)[0]
-                if header_len <= DBASE_HEADER_BASE or record_size < 1:
-                    return False
+            header_len = struct.unpack_from("<H", data, 8)[0]
+            record_size = struct.unpack_from("<H", data, 10)[0]
+            if header_len <= DBASE_HEADER_BASE or record_size < 1:
+                return False
 
-                # Read field descriptors
-                fields: list[tuple[str, int, int]] = []
-                offset = 1  # byte 0 is the delete mark
-                while True:
-                    fd = f.read(DBASE_FIELD_SIZE)
-                    if not fd or fd[0] == DBASE_HEADER_TERMINATOR:
-                        break
-                    if len(fd) < DBASE_FIELD_SIZE:
-                        break
-                    name = fd[:11].split(b"\x00")[0].decode("ascii", errors="replace")
-                    flen = fd[16]
-                    fields.append((name, offset, flen))
-                    offset += flen
+            # Read field descriptors from header area
+            fields: list[tuple[str, int, int]] = []
+            field_offset = 1  # byte 0 in each record is the delete mark
+            pos = DBASE_HEADER_BASE
+            while pos + DBASE_FIELD_SIZE <= len(data):
+                if data[pos] == DBASE_HEADER_TERMINATOR:
+                    break
+                fd = data[pos: pos + DBASE_FIELD_SIZE]
+                name = fd[:11].split(b"\x00")[0].decode("ascii", errors="replace")
+                flen = fd[16]
+                fields.append((name, field_offset, flen))
+                field_offset += flen
+                pos += DBASE_FIELD_SIZE
 
             self._header_len = header_len
             self._record_size = record_size
@@ -286,9 +292,8 @@ class HamlogReader:
         if not self._load_header():
             return None
         try:
-            with self._open_with_retry(self._filepath) as f:
-                f.seek(self._header_len + index * self._record_size)
-                data = f.read(self._record_size)
+            offset = self._header_len + index * self._record_size
+            data = self._read_with_retry(self._filepath, offset, self._record_size)
         except (IOError, OSError, PermissionError) as e:
             logger.error("Read error on record %d: %s", index, e)
             return None
@@ -316,9 +321,9 @@ class HamlogReader:
         if not self._load_header():
             return records
         try:
-            with self._open_with_retry(self._filepath) as f:
-                f.seek(self._header_len + start * self._record_size)
-                block = f.read((stop - start) * self._record_size)
+            offset = self._header_len + start * self._record_size
+            size = (stop - start) * self._record_size
+            block = self._read_with_retry(self._filepath, offset, size)
         except (IOError, OSError, PermissionError) as e:
             logger.error("Read error in range %d..%d: %s", start, stop, e)
             return records

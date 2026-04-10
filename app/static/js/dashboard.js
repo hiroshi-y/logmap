@@ -216,16 +216,38 @@ function addQsoToMap(qso, isActive) {
         qso: qso,
         isDot: false,
         isActive: isActive,
+        _infoOpen: isActive,
     });
 
-    // Click to show/hide info
+    // Click to toggle info window (for dots: restore card, re-click: back to dot)
     marker.addListener('click', () => {
-        infoWindow.open(map, marker);
+        const entry = qsoEntries.find(e => e.marker === marker);
+        if (!entry) return;
+
+        if (entry._infoOpen) {
+            // Close the card; if it was a dot, return to dot appearance
+            infoWindow.close();
+            entry._infoOpen = false;
+            if (entry.isDot) {
+                marker.setIcon(getDotIcon());
+                marker.setZIndex(100);
+            }
+        } else {
+            // Show the card; if it's a dot, temporarily show full card
+            if (entry.isDot) {
+                const content = createMiniPanelHtml(entry.qso, false);
+                infoWindow.setContent(content);
+                marker.setIcon(getMarkerIcon(false));
+                marker.setZIndex(500);
+            }
+            infoWindow.open(map, marker);
+            entry._infoOpen = true;
+        }
     });
 }
 
 function createMiniPanelHtml(qso, isActive) {
-    const sizeClass = isActive ? 'active new' : 'small';
+    const sizeClass = isActive ? 'active new' : 'past';
     const distStr = qso.distance_km.toLocaleString(undefined, { maximumFractionDigits: 0 });
 
     return `
@@ -279,9 +301,9 @@ function shrinkActivePanels() {
             // Update marker icon to smaller
             entry.marker.setIcon(getMarkerIcon(false));
             entry.marker.setZIndex(500);
-            // Update info window content to small
-            const smallContent = createMiniPanelHtml(entry.qso, false);
-            entry.infoWindow.setContent(smallContent);
+            // Update info window content to past style
+            const pastContent = createMiniPanelHtml(entry.qso, false);
+            entry.infoWindow.setContent(pastContent);
         }
     });
 }
@@ -297,6 +319,7 @@ function enforceMaxPanels() {
             const entry = panelEntries[i];
             entry.isDot = true;
             entry.isActive = false;
+            entry._infoOpen = false;
             entry.infoWindow.close();
             entry.marker.setIcon(getDotIcon());
             entry.marker.setZIndex(100);
