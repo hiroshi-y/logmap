@@ -110,6 +110,26 @@ function initMap() {
     });
     document.getElementById('btn-reset-zoom').addEventListener('click', resetZoom);
 
+    // Debug button: test bringToFront on active card
+    const dbgBtn = document.createElement('button');
+    dbgBtn.textContent = 'DBG: Raise Active';
+    dbgBtn.style.cssText = 'position:fixed;top:55px;left:10px;z-index:9999;padding:8px 12px;background:#ff0;color:#000;font-weight:bold;border:2px solid #000;cursor:pointer;font-size:14px;';
+    dbgBtn.onclick = () => {
+        const active = qsoEntries.find(e => e.isActive);
+        if (!active) { console.log('DBG: no active entry'); return; }
+        console.log('DBG: active._iwL6 =', active._iwL6);
+        console.log('DBG: active._iwL6.style.zIndex BEFORE =', active._iwL6 ? active._iwL6.style.zIndex : 'N/A');
+        console.log('DBG: active._infoOpen =', active._infoOpen);
+        // Log all open cards' L6 z-index
+        qsoEntries.filter(e => e._infoOpen && e._iwL6).forEach(e => {
+            console.log(`DBG: ${e.qso.callsign} isActive=${e.isActive} L6.zIndex=${e._iwL6.style.zIndex}`);
+        });
+        // Now do the same thing as clicking a blue card
+        bringToFront(active);
+        console.log('DBG: active._iwL6.style.zIndex AFTER =', active._iwL6 ? active._iwL6.style.zIndex : 'N/A');
+    };
+    document.body.appendChild(dbgBtn);
+
     // Initialize SocketIO after map is ready
     initSocketIO();
 
