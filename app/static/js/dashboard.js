@@ -222,7 +222,8 @@ function addQsoToMap(qso, isActive) {
     }
 
     // Create info window with mini-panel content
-    const content = createMiniPanelHtml(qso, isActive);
+    const panelId = ++panelIdCounter;
+    const content = createMiniPanelHtml(qso, isActive, panelId);
     const infoWindow = new google.maps.InfoWindow({
         content: content,
         disableAutoPan: true,
@@ -237,7 +238,7 @@ function addQsoToMap(qso, isActive) {
         isDot: false,
         isActive: isActive,
         _infoOpen: isActive,
-        _panelId: panelIdCounter,  // matches data-panel-id in the HTML
+        _panelId: panelId,  // matches data-panel-id in the HTML
         _iwContainer: null,        // cached DOM ref, set on first domready
     };
     qsoEntries.push(entry);
@@ -260,8 +261,7 @@ function addQsoToMap(qso, isActive) {
         } else {
             // Show the card; if it's a dot, temporarily show full card
             if (entry.isDot) {
-                const content = createMiniPanelHtml(entry.qso, false);
-                infoWindow.setContent(content);
+                infoWindow.setContent(createMiniPanelHtml(entry.qso, false, entry._panelId));
                 marker.setIcon(getMarkerIcon(false));
                 entry._iwContainer = null;  // content changed, recapture
             }
@@ -274,10 +274,9 @@ function addQsoToMap(qso, isActive) {
 
 let panelIdCounter = 0;
 
-function createMiniPanelHtml(qso, isActive) {
+function createMiniPanelHtml(qso, isActive, panelId) {
     const sizeClass = isActive ? 'active' : 'past';
     const distStr = qso.distance_km.toLocaleString(undefined, { maximumFractionDigits: 0 });
-    const panelId = `mp-${++panelIdCounter}`;
 
     return `
         <div class="mini-panel ${sizeClass}" data-panel-id="${panelId}">
@@ -361,8 +360,8 @@ function shrinkActivePanels() {
             entry.marker.setIcon(getMarkerIcon(false));
             entry.marker.setZIndex(500);
             // Update info window content to past style
-            const pastContent = createMiniPanelHtml(entry.qso, false);
-            entry.infoWindow.setContent(pastContent);
+            entry.infoWindow.setContent(createMiniPanelHtml(entry.qso, false, entry._panelId));
+            entry._iwContainer = null;  // content changed, recapture
         }
     });
 }
