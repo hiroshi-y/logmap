@@ -222,6 +222,8 @@ function initSocketIO() {
         });
         updateFarthestLines();
         resetZoom();
+        // After map finishes zoom/pan, raise active card above all others
+        google.maps.event.addListenerOnce(map, 'idle', ensureActiveOnTop);
         setStatus('status.monitoring');
     });
 
@@ -231,6 +233,7 @@ function initSocketIO() {
         enforceMaxPanels();
         updateFarthestLines();
         resetZoom();
+        google.maps.event.addListenerOnce(map, 'idle', ensureActiveOnTop);
     });
 
     socket.on('stats_update', (stats) => {
