@@ -63,8 +63,15 @@ class LogMonitor:
             "farthest_distance": 0.0,
         }
 
-    def start(self) -> None:
-        """Start monitoring in a background thread."""
+    def start(self, background_task_fn=None) -> None:
+        """Start monitoring in a background thread.
+
+        Args:
+            background_task_fn: Optional callable to start the background
+                task (e.g. ``socketio.start_background_task``).  When
+                provided, the poll loop runs inside the async framework
+                (eventlet/gevent) instead of a raw OS thread.
+        """
         if self._thread and self._thread.is_alive():
             return
 
@@ -72,8 +79,13 @@ class LogMonitor:
         self._last_count = self._reader.get_record_count()
         self._today_date = date.today()
         self._stop_event.clear()
-        self._thread = threading.Thread(target=self._poll_loop, daemon=True)
-        self._thread.start()
+
+        if background_task_fn:
+            self._thread = background_task_fn(self._poll_loop)
+        else:
+            self._thread = threading.Thread(target=self._poll_loop, daemon=True)
+            self._thread.start()
+
         logger.info(
             "Log monitor started. Current records: %d, polling every %.1fs",
             self._last_count, self._poll_interval,
@@ -82,9 +94,9 @@ class LogMonitor:
     def stop(self) -> None:
         """Stop monitoring."""
         self._stop_event.set()
-        if self._thread:
+        if self._thread and hasattr(self._thread, 'join'):
             self._thread.join(timeout=2)
-            self._thread = None
+        self._thread = None
         logger.info("Log monitor stopped.")
 
     def get_today_qsos(self) -> list[QsoEvent]:

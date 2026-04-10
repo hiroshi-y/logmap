@@ -216,10 +216,17 @@ body {
     border-radius: 6px 6px 0 0;
 }
 
-/* Active (latest) QSO: bright yellow */
+/* Active (latest) QSO: bright yellow with flashing border */
 .mini-panel.active {
     transform: scale(1);
     opacity: 1;
+    box-shadow: 0 0 8px 2px rgba(255, 200, 0, 0.8);
+    animation: flashBorder 1.5s ease-in-out 4;
+}
+
+@keyframes flashBorder {
+    0%, 100% { box-shadow: 0 0 8px 2px rgba(255, 200, 0, 0.3); }
+    50%      { box-shadow: 0 0 16px 6px rgba(255, 200, 0, 1); }
 }
 
 /* Past QSOs: same size, muted blue-grey tint */

@@ -18,6 +18,9 @@ const MAX_MINI_PANELS = LOGMAP_CONFIG.maxMiniPanels;
 // Track today's date for midnight rollover
 let todayDateStr = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
 
+// Incrementing z-index counter so the last-clicked card is always on top
+let nextZIndex = 900;
+
 
 /* ===== Clock ===== */
 function updateClock() {
@@ -62,6 +65,9 @@ function handleMidnightRollover() {
 
 /* ===== Google Map Initialization ===== */
 function initMap() {
+    if (window._mapInitialized) return;
+    window._mapInitialized = true;
+
     const stationPos = {
         lat: LOGMAP_CONFIG.stationLat,
         lng: LOGMAP_CONFIG.stationLon
@@ -240,7 +246,7 @@ function addQsoToMap(qso, isActive) {
                 marker.setIcon(getMarkerIcon(false));
             }
             // Bring this marker to front so its card is above others
-            marker.setZIndex(900);
+            marker.setZIndex(++nextZIndex);
             infoWindow.open(map, marker);
             entry._infoOpen = true;
         }

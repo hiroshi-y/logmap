@@ -73,13 +73,22 @@
         };
     </script>
 
-    <!-- Google Maps API -->
-    <script src="https://maps.googleapis.com/maps/api/js?key={{ google_api_key }}&callback=initMap" async defer></script>
-
     <!-- Socket.IO -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
 
     <!-- Dashboard JS -->
     <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+
+    <!-- Google Maps API -->
+    <script src="https://maps.googleapis.com/maps/api/js?key={{ google_api_key }}&callback=initMap" async defer></script>
+    <script>
+        // On F5 reload the Maps API may already be cached and the callback
+        // won't fire again.  Detect this and call initMap ourselves.
+        document.addEventListener('DOMContentLoaded', function() {
+            if (window.google && window.google.maps && !window._mapInitialized) {
+                initMap();
+            }
+        });
+    </script>
 </body>
 </html>
