@@ -52,7 +52,7 @@ class LogMonitor:
         self._poll_interval = poll_interval
         self._on_new_qso = on_new_qso
         self._last_count = 0
-        self._running = False
+        self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._today_qsos: list[QsoEvent] = []
         self._today_date: date | None = None
@@ -71,7 +71,7 @@ class LogMonitor:
         # Initialize with current record count
         self._last_count = self._reader.get_record_count()
         self._today_date = date.today()
-        self._running = True
+        self._stop_event.clear()
         self._thread = threading.Thread(target=self._poll_loop, daemon=True)
         self._thread.start()
         logger.info(
@@ -81,9 +81,9 @@ class LogMonitor:
 
     def stop(self) -> None:
         """Stop monitoring."""
-        self._running = False
+        self._stop_event.set()
         if self._thread:
-            self._thread.join(timeout=5)
+            self._thread.join(timeout=2)
             self._thread = None
         logger.info("Log monitor stopped.")
 
@@ -110,7 +110,7 @@ class LogMonitor:
 
     def _poll_loop(self) -> None:
         """Main polling loop - runs in background thread."""
-        while self._running:
+        while not self._stop_event.is_set():
             try:
                 self._check_date_rollover()
                 current_count = self._reader.get_record_count()
@@ -130,7 +130,7 @@ class LogMonitor:
             except Exception as e:
                 logger.error("Error in poll loop: %s", e)
 
-            time.sleep(self._poll_interval)
+            self._stop_event.wait(self._poll_interval)
 
     def _check_date_rollover(self) -> None:
         """Clear data when crossing midnight (local time)."""

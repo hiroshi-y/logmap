@@ -2,8 +2,11 @@
 Entry point for the application.
 """
 
+import argparse
 import os
 import sys
+
+import yaml
 
 # Ensure project root is in path
 sys.path.insert(0, os.path.dirname(__file__))
@@ -12,24 +15,29 @@ from app.server import create_app, socketio, start_monitoring
 
 
 def main():
-    config_path = os.path.join(os.path.dirname(__file__), "config.yaml")
+    parser = argparse.ArgumentParser(description="LogMap amateur radio dashboard")
+    parser.add_argument(
+        "-c", "--config",
+        default=os.path.join(os.path.dirname(__file__), "config.yaml"),
+        help="path to config.yaml (default: config.yaml in project root)",
+    )
+    parser.add_argument(
+        "-n", "--initial-qsos",
+        type=int,
+        default=None,
+        help="number of past QSOs to preload (default: 1, from config)",
+    )
+    args = parser.parse_args()
 
-    # Allow config override via command line
-    if len(sys.argv) > 1:
-        config_path = sys.argv[1]
+    app = create_app(args.config)
 
-    app = create_app(config_path)
-
-    # Read dashboard settings from config
-    import yaml
-    with open(config_path, "r", encoding="utf-8") as f:
+    with open(args.config, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
     host = config.get("dashboard", {}).get("host", "0.0.0.0")
     port = config.get("dashboard", {}).get("port", 5000)
 
-    # Start log monitoring
-    start_monitoring()
+    start_monitoring(initial_qso_count=args.initial_qsos)
 
     print(f"LogMap Dashboard starting on http://{host}:{port}")
     print("Press Ctrl+C to stop.")

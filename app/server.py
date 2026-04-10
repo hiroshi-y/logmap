@@ -197,9 +197,9 @@ def register_socket_events() -> None:
         })
 
 
-def start_monitoring() -> None:
+def start_monitoring(initial_qso_count: int | None = None) -> None:
     """Start the log monitor (call after app is created)."""
     if monitor:
-        initial = config.get("dashboard", {}).get("initial_qso_count", 1)
-        monitor.load_initial_qsos(initial)
+        count = initial_qso_count if initial_qso_count is not None else config.get("dashboard", {}).get("initial_qso_count", 1)
+        monitor.load_initial_qsos(count)
         monitor.start()

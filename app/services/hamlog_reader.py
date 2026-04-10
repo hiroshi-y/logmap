@@ -32,7 +32,10 @@ To allow external readers (like LogMap), start HAMLOG with the `-S` switch,
 e.g. `Hamlogw.exe -S`. See the HAMLOG50 API documentation for details.
 """
 
+import ctypes
+import ctypes.wintypes
 import logging
+import msvcrt
 import os
 import struct
 import time
@@ -52,6 +55,34 @@ DELETE_MARK_ACTIVE = 0x20
 # Retry settings for file access (Dropbox sync can briefly lock the file)
 _OPEN_RETRIES = 5
 _OPEN_RETRY_DELAY = 0.3  # seconds
+
+# Windows API constants for CreateFileW
+_GENERIC_READ = 0x80000000
+_FILE_SHARE_ALL = 0x07  # FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE
+_OPEN_EXISTING = 3
+_INVALID_HANDLE = ctypes.c_void_p(-1).value
+_kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+
+def _open_shared(path: str):
+    """Open a file for reading with maximum sharing flags via Win32 API.
+
+    Python's built-in ``open()`` uses ``_SH_DENYNO`` which *should* share,
+    but in practice HAMLOG + Dropbox still block it.  ``CreateFileW`` with
+    ``FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE`` is the most
+    permissive combination Windows supports.
+    """
+    handle = _kernel32.CreateFileW(
+        str(path), _GENERIC_READ, _FILE_SHARE_ALL,
+        None, _OPEN_EXISTING, 0, None,
+    )
+    if handle == _INVALID_HANDLE:
+        err = ctypes.get_last_error()
+        raise PermissionError(
+            f"CreateFileW failed for {path} (win32 error {err})"
+        )
+    fd = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+    return os.fdopen(fd, "rb")
 
 
 @dataclass
@@ -168,14 +199,14 @@ class HamlogReader:
 
     @staticmethod
     def _open_with_retry(path: str):
-        """Open a file for binary reading, retrying on permission errors.
+        """Open a file for binary reading via Win32 shared mode, with retry.
 
-        Dropbox (and other sync tools) briefly lock files while syncing,
-        so a single PermissionError is not fatal — just retry.
+        Uses CreateFileW for maximum sharing compatibility, and retries on
+        transient PermissionErrors (e.g. Dropbox sync locking the file).
         """
         for attempt in range(_OPEN_RETRIES):
             try:
-                return open(path, "rb")
+                return _open_shared(path)
             except PermissionError:
                 if attempt == _OPEN_RETRIES - 1:
                     raise
