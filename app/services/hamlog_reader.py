@@ -60,8 +60,32 @@ _GENERIC_READ = 0x80000000
 _FILE_SHARE_ALL = 0x07  # FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE
 _OPEN_EXISTING = 3
 _FILE_BEGIN = 0
-_INVALID_HANDLE = ctypes.c_void_p(-1).value
+
 _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+# Properly type CreateFileW so the HANDLE comparison works on both
+# 32-bit and 64-bit Python (default restype is c_int which breaks the
+# INVALID_HANDLE_VALUE check).
+_kernel32.CreateFileW.restype = ctypes.wintypes.HANDLE
+_kernel32.CreateFileW.argtypes = [
+    ctypes.wintypes.LPCWSTR,  # lpFileName
+    ctypes.wintypes.DWORD,    # dwDesiredAccess
+    ctypes.wintypes.DWORD,    # dwShareMode
+    ctypes.c_void_p,          # lpSecurityAttributes
+    ctypes.wintypes.DWORD,    # dwCreationDisposition
+    ctypes.wintypes.DWORD,    # dwFlagsAndAttributes
+    ctypes.wintypes.HANDLE,   # hTemplateFile
+]
+_kernel32.GetFileSize.restype = ctypes.wintypes.DWORD
+_kernel32.GetFileSize.argtypes = [ctypes.wintypes.HANDLE, ctypes.POINTER(ctypes.wintypes.DWORD)]
+_kernel32.SetFilePointer.restype = ctypes.wintypes.DWORD
+_kernel32.SetFilePointer.argtypes = [ctypes.wintypes.HANDLE, ctypes.wintypes.LONG, ctypes.POINTER(ctypes.wintypes.LONG), ctypes.wintypes.DWORD]
+_kernel32.ReadFile.restype = ctypes.wintypes.BOOL
+_kernel32.ReadFile.argtypes = [ctypes.wintypes.HANDLE, ctypes.c_void_p, ctypes.wintypes.DWORD, ctypes.POINTER(ctypes.wintypes.DWORD), ctypes.c_void_p]
+_kernel32.CloseHandle.restype = ctypes.wintypes.BOOL
+_kernel32.CloseHandle.argtypes = [ctypes.wintypes.HANDLE]
+
+_INVALID_HANDLE = ctypes.wintypes.HANDLE(-1).value
 
 
 def _win32_read(path: str, offset: int = 0, size: int | None = None) -> bytes:
@@ -72,7 +96,7 @@ def _win32_read(path: str, offset: int = 0, size: int | None = None) -> bytes:
     can be read while HAMLOG and Dropbox both hold it open.
     """
     handle = _kernel32.CreateFileW(
-        str(path), _GENERIC_READ, _FILE_SHARE_ALL,
+        path, _GENERIC_READ, _FILE_SHARE_ALL,
         None, _OPEN_EXISTING, 0, None,
     )
     if handle == _INVALID_HANDLE:

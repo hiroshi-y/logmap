@@ -4,6 +4,7 @@ Entry point for the application.
 
 import argparse
 import os
+import signal
 import sys
 
 import yaml
@@ -11,7 +12,7 @@ import yaml
 # Ensure project root is in path
 sys.path.insert(0, os.path.dirname(__file__))
 
-from app.server import create_app, socketio, start_monitoring
+from app.server import create_app, socketio, start_monitoring, monitor
 
 
 def main():
@@ -38,6 +39,15 @@ def main():
     port = config.get("dashboard", {}).get("port", 5000)
 
     start_monitoring(initial_qso_count=args.initial_qsos)
+
+    # Ensure Ctrl+C stops quickly
+    def _shutdown(signum, frame):
+        print("\nShutting down...")
+        if monitor:
+            monitor.stop()
+        os._exit(0)
+
+    signal.signal(signal.SIGINT, _shutdown)
 
     print(f"LogMap Dashboard starting on http://{host}:{port}")
     print("Press Ctrl+C to stop.")
