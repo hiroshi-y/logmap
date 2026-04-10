@@ -211,18 +211,28 @@ function initSocketIO() {
         clearAllMarkers();
         const openCount = LOGMAP_CONFIG.openCards || 1;
         const openStart = Math.max(0, qsos.length - openCount);
-        // Draw past (blue) cards first
+        // 1) Add all past (blue) cards and open their InfoWindows
         qsos.forEach((qso, index) => {
-            if (index === qsos.length - 1) return; // skip active for now
+            if (index === qsos.length - 1) return; // active handled below
             const showCard = (index >= openStart);
             addQsoToMap(qso, false, showCard);
         });
-        // Draw active (yellow) card LAST so it renders on top
+        // 2) Add active (yellow) card but do NOT open its InfoWindow yet
         if (qsos.length > 0) {
-            addQsoToMap(qsos[qsos.length - 1], true, true);
+            addQsoToMap(qsos[qsos.length - 1], true, false);
         }
         updateFarthestLines();
         resetZoom();
+        // 3) After the map finishes rendering (idle), open the active
+        //    card's InfoWindow — it will be the last one Google opens,
+        //    so it naturally renders on top of all other cards.
+        google.maps.event.addListenerOnce(map, 'idle', () => {
+            const activeEntry = qsoEntries.find(e => e.isActive);
+            if (activeEntry) {
+                activeEntry.infoWindow.open(map, activeEntry.marker);
+                activeEntry._infoOpen = true;
+            }
+        });
         setStatus('status.monitoring');
     });
 
