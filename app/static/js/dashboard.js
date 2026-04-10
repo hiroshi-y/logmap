@@ -350,10 +350,28 @@ function addQsoToMap(qso, isActive, showCard) {
             panelEl.style.cursor = 'pointer';
             panelEl.onclick = () => bringToFront(entry);
         }
-        // Active card is opened after idle (deferred), so its domready
-        // fires after all other cards are rendered. Set z-index here.
-        if (entry.isActive && entry._iwL6) {
-            entry._iwL6.style.zIndex = String(++nextIwZIndex);
+        // For the active card, watch L6 for Google Maps overwriting z-index.
+        // Google adjusts z-index AFTER domready, so we use MutationObserver
+        // to catch and override it.
+        if (entry.isActive && entry._iwL6 && !entry._zObserver) {
+            const targetZ = ++nextIwZIndex;
+            entry._iwL6.style.zIndex = String(targetZ);
+            entry._zObserver = new MutationObserver(() => {
+                const cur = parseInt(entry._iwL6.style.zIndex) || 0;
+                if (cur < targetZ) {
+                    entry._iwL6.style.zIndex = String(targetZ);
+                }
+            });
+            entry._zObserver.observe(entry._iwL6, {
+                attributes: true, attributeFilter: ['style']
+            });
+            // Stop watching after 3 seconds (Google is done by then)
+            setTimeout(() => {
+                if (entry._zObserver) {
+                    entry._zObserver.disconnect();
+                    entry._zObserver = null;
+                }
+            }, 3000);
         }
     });
 
