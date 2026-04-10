@@ -129,9 +129,6 @@ function initMap() {
 
 let nextIwZIndex = 10000;
 
-// Number of InfoWindows waiting for domready to fire
-let _pendingDomready = 0;
-
 function bringToFront(entry) {
     if (entry._iwL6) {
         entry._iwL6.style.zIndex = String(++nextIwZIndex);
@@ -214,13 +211,16 @@ function initSocketIO() {
         clearAllMarkers();
         const openCount = LOGMAP_CONFIG.openCards || 1;
         const openStart = Math.max(0, qsos.length - openCount);
-        // Count how many cards will open (need domready before raising active)
-        _pendingDomready = qsos.filter((_, i) => i >= openStart).length;
+        // Draw past (blue) cards first
         qsos.forEach((qso, index) => {
-            const isLatest = (index === qsos.length - 1);
+            if (index === qsos.length - 1) return; // skip active for now
             const showCard = (index >= openStart);
-            addQsoToMap(qso, isLatest, showCard);
+            addQsoToMap(qso, false, showCard);
         });
+        // Draw active (yellow) card LAST so it renders on top
+        if (qsos.length > 0) {
+            addQsoToMap(qsos[qsos.length - 1], true, true);
+        }
         updateFarthestLines();
         resetZoom();
         setStatus('status.monitoring');
@@ -228,7 +228,6 @@ function initSocketIO() {
 
     socket.on('new_qso', (qso) => {
         shrinkActivePanels();
-        _pendingDomready = 1;
         addQsoToMap(qso, true);
         enforceMaxPanels();
         updateFarthestLines();
@@ -307,8 +306,7 @@ function addQsoToMap(qso, isActive, showCard) {
         infoWindow.open(map, marker);
     }
 
-    // On domready: cache L6, attach click handler.
-    // When the last pending card is ready, "click" the active card to raise it.
+    // On domready: cache L6, attach click-to-front handler
     google.maps.event.addListener(infoWindow, 'domready', () => {
         const panelEl = document.getElementById(entry._panelId);
         if (panelEl) {
@@ -321,26 +319,6 @@ function addQsoToMap(qso, isActive, showCard) {
             }
             panelEl.style.cursor = 'pointer';
             panelEl.onclick = () => bringToFront(entry);
-        }
-        // After the last card renders, raise active on the next event loop
-        // tick (same timing as a real user click — Google Maps may still
-        // adjust z-index within the current domready cycle).
-        if (_pendingDomready > 0) {
-            _pendingDomready--;
-            if (_pendingDomready === 0) {
-                setTimeout(() => {
-                    // Simulate clicking a blue card: this sets the blue
-                    // card's z-index (overriding Google's value) AND then
-                    // raises the active card above it.
-                    const anyPast = qsoEntries.find(e => !e.isActive && e._iwL6 && e._infoOpen);
-                    if (anyPast) {
-                        bringToFront(anyPast);
-                    } else {
-                        const active = qsoEntries.find(e => e.isActive && e._iwL6);
-                        if (active) bringToFront(active);
-                    }
-                }, 0);
-            }
         }
     });
 
