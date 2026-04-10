@@ -181,18 +181,21 @@ function addDebugPins() {
                     fillColor: p.color, fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 },
             zIndex: 500,
         });
-        const iw = new google.maps.InfoWindow({ disableAutoPan: true });
         let iwL6 = null;
 
-        function updateContent() {
-            const z = iwL6 ? iwL6.style.zIndex : '(not cached)';
-            iw.setContent(
+        function makeContent(z) {
+            return (
                 `<div id="${p.id}" style="background:${p.color};color:#fff;padding:12px;border-radius:6px;font-size:16px;cursor:pointer;min-width:150px;">` +
                 `<b>デバッグ ${p.label}</b><br>` +
                 `L6 z-index: <b>${z}</b><br>` +
                 `<small>カードをクリック → z-order UP</small></div>`
             );
         }
+
+        const iw = new google.maps.InfoWindow({
+            content: makeContent('(init)'),
+            disableAutoPan: true,
+        });
 
         google.maps.event.addListener(iw, 'domready', () => {
             // Cache L6: walk up from .gm-style-iw-a
@@ -205,29 +208,24 @@ function addDebugPins() {
                     }
                 }
             }
-            updateContent();
-
-            // Attach click on the card content
+            // Update displayed z-index
+            const zDisplay = iwL6 ? iwL6.style.zIndex : '(not cached)';
             const el = document.getElementById(p.id);
             if (el) {
+                el.querySelector('b:last-of-type').textContent = zDisplay;
                 el.onclick = () => {
                     if (iwL6) {
                         iwL6.style.zIndex = String(++nextIwZIndex);
-                        console.log(`${p.label}: set L6 zIndex to ${nextIwZIndex}`);
+                        console.log(`${p.label}: set L6 zIndex to ${nextIwZIndex}, was ${zDisplay}`);
+                        el.querySelector('b:last-of-type').textContent = String(nextIwZIndex);
                     } else {
                         console.log(`${p.label}: iwL6 is null!`);
                     }
-                    // Refresh display after a tick
-                    setTimeout(updateContent, 50);
                 };
             }
         });
 
-        // Open on pin click (pin is visible because no IW covers it initially)
-        marker.addListener('click', () => {
-            iw.open(map, marker);
-        });
-        // Auto-open
+        marker.addListener('click', () => { iw.open(map, marker); });
         iw.open(map, marker);
     });
 }
