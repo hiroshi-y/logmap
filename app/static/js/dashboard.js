@@ -121,66 +121,63 @@ function initMap() {
 }
 
 
-/* ===== Debug Marker ===== */
+/* ===== Debug Markers ===== */
 function addDebugMarker() {
-    // Place a debug pin slightly offset from the station
-    const pos = {
-        lat: LOGMAP_CONFIG.stationLat + 0.3,
-        lng: LOGMAP_CONFIG.stationLon + 0.3,
-    };
+    // Two debug markers near the station to test z-order between them
+    const debugData = [
+        { label: 'デバッグA', color: '#ff00ff', offsetLat: 0.2, offsetLng: 0.2 },
+        { label: 'デバッグB', color: '#00ffff', offsetLat: 0.22, offsetLng: 0.22 },
+    ];
 
-    const debugMarker = new google.maps.Marker({
-        position: pos,
-        map: map,
-        icon: {
-            path: google.maps.SymbolPath.CIRCLE,
-            scale: 10,
-            fillColor: '#ff00ff',
-            fillOpacity: 1,
-            strokeColor: '#ffffff',
-            strokeWeight: 3,
-        },
-        title: 'DEBUG',
-        zIndex: 500,
-    });
+    debugData.forEach(d => {
+        const pos = {
+            lat: LOGMAP_CONFIG.stationLat + d.offsetLat,
+            lng: LOGMAP_CONFIG.stationLon + d.offsetLng,
+        };
 
-    const debugIw = new google.maps.InfoWindow({
-        content: '<div style="background:#ff00ff;color:#fff;padding:10px 16px;border-radius:6px;font-weight:bold;font-size:18px;">デバッグ</div>',
-        disableAutoPan: true,
-    });
-    debugIw.open(map, debugMarker);
-
-    debugMarker.addListener('click', () => {
-        console.log('=== DEBUG MARKER CLICKED ===');
-
-        // Find the debug InfoWindow's DOM
-        // Walk up from the content div
-        const allIwContainers = document.querySelectorAll('.gm-style-iw-a');
-        console.log('Total .gm-style-iw-a elements:', allIwContainers.length);
-
-        allIwContainers.forEach((el, i) => {
-            console.log(`  [${i}] textContent: "${el.textContent.trim().substring(0, 30)}"`,
-                'zIndex:', el.style.zIndex,
-                'parent.zIndex:', el.parentElement ? el.parentElement.style.zIndex : 'N/A',
-                'parent.parent.zIndex:', (el.parentElement && el.parentElement.parentElement) ? el.parentElement.parentElement.style.zIndex : 'N/A');
-
-            // Walk up 5 levels and log each
-            let node = el;
-            for (let level = 0; level < 8 && node; level++) {
-                const tag = node.tagName || '?';
-                const pos = node.style ? node.style.position : '';
-                const z = node.style ? node.style.zIndex : '';
-                const cls = node.className || '';
-                console.log(`    L${level}: <${tag}> pos="${pos}" z="${z}" class="${cls}"`);
-                node = node.parentElement;
-            }
+        const marker = new google.maps.Marker({
+            position: pos,
+            map: map,
+            icon: {
+                path: google.maps.SymbolPath.CIRCLE,
+                scale: 10,
+                fillColor: d.color,
+                fillOpacity: 1,
+                strokeColor: '#ffffff',
+                strokeWeight: 3,
+            },
+            title: d.label,
+            zIndex: 500,
         });
 
-        // Also check for .gm-style > div structure
-        const gmDivs = document.querySelectorAll('.gm-style > div > div > div[style*="z-index"]');
-        console.log('gm-style divs with z-index:', gmDivs.length);
-        gmDivs.forEach((el, i) => {
-            console.log(`  gm[${i}] z=${el.style.zIndex} children=${el.children.length}`);
+        // Use an id so we can find this specific InfoWindow in the DOM
+        const iwId = 'debug-iw-' + d.label;
+        const iw = new google.maps.InfoWindow({
+            content: `<div id="${iwId}" style="background:${d.color};color:#fff;padding:10px 16px;border-radius:6px;font-weight:bold;font-size:18px;cursor:pointer;">${d.label}<br><small>クリックでDOM調査</small></div>`,
+            disableAutoPan: true,
+        });
+        iw.open(map, marker);
+
+        // Listen on domready to attach click handler to the CONTENT (not the marker)
+        google.maps.event.addListener(iw, 'domready', () => {
+            const el = document.getElementById(iwId);
+            if (!el) return;
+            el.onclick = () => {
+                console.log(`=== ${d.label} CLICKED ===`);
+
+                // Walk up from this element and log every ancestor
+                let node = el;
+                for (let level = 0; level < 15 && node; level++) {
+                    const tag = node.tagName || '?';
+                    const posStyle = node.style ? node.style.position : '';
+                    const z = node.style ? node.style.zIndex : '';
+                    const cls = (node.className || '').substring(0, 50);
+                    const inlineZ = node.getAttribute ? node.getAttribute('style') : '';
+                    const zInInline = inlineZ && inlineZ.includes('z-index') ? inlineZ.match(/z-index:\s*(\d+)/)?.[1] || '' : '';
+                    console.log(`  L${level}: <${tag}> class="${cls}" position="${posStyle}" zIndex="${z}" inlineZ="${zInInline}"`);
+                    node = node.parentElement;
+                }
+            };
         });
     });
 }
