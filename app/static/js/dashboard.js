@@ -351,8 +351,9 @@ function addQsoToMap(qso, isActive, showCard) {
             panelEl.onclick = () => bringToFront(entry);
         }
         // For the active card, watch L6 for Google Maps overwriting z-index.
-        // Google adjusts z-index AFTER domready, so we use MutationObserver
-        // to catch and override it.
+        // Google adjusts z-index after domready and on every drag/zoom.
+        // MutationObserver catches and overrides it until the card is
+        // no longer active (disconnected in shrinkActivePanels).
         if (entry.isActive && entry._iwL6 && !entry._zObserver) {
             const targetZ = ++nextIwZIndex;
             entry._iwL6.style.zIndex = String(targetZ);
@@ -365,13 +366,6 @@ function addQsoToMap(qso, isActive, showCard) {
             entry._zObserver.observe(entry._iwL6, {
                 attributes: true, attributeFilter: ['style']
             });
-            // Stop watching after 3 seconds (Google is done by then)
-            setTimeout(() => {
-                if (entry._zObserver) {
-                    entry._zObserver.disconnect();
-                    entry._zObserver = null;
-                }
-            }, 3000);
         }
     });
 
@@ -447,6 +441,10 @@ function shrinkActivePanels() {
     qsoEntries.forEach(entry => {
         if (entry.isActive && !entry.isDot) {
             entry.isActive = false;
+            if (entry._zObserver) {
+                entry._zObserver.disconnect();
+                entry._zObserver = null;
+            }
             entry.marker.setIcon(getMarkerIcon(false));
             entry.marker.setZIndex(500);
             entry.infoWindow.setContent(createMiniPanelHtml(entry.qso, false, entry._panelId));
