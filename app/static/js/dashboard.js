@@ -140,6 +140,13 @@ function bringToFront(entry) {
 }
 
 function ensureActiveOnTop() {
+    // Set explicit z-index on ALL open cards (overriding Google Maps' values),
+    // then set the active card highest — same as clicking each blue card.
+    qsoEntries.forEach(entry => {
+        if (entry._iwL6 && entry._infoOpen && !entry.isActive) {
+            entry._iwL6.style.zIndex = String(++nextIwZIndex);
+        }
+    });
     const active = qsoEntries.find(e => e.isActive && e._iwL6);
     if (active) {
         active._iwL6.style.zIndex = String(++nextIwZIndex);
