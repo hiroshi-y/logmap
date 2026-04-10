@@ -350,6 +350,11 @@ function addQsoToMap(qso, isActive, showCard) {
             panelEl.style.cursor = 'pointer';
             panelEl.onclick = () => bringToFront(entry);
         }
+        // Active card is opened after idle (deferred), so its domready
+        // fires after all other cards are rendered. Set z-index here.
+        if (entry.isActive && entry._iwL6) {
+            entry._iwL6.style.zIndex = String(++nextIwZIndex);
+        }
     });
 
     // Click marker to toggle info window
