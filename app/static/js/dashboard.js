@@ -19,7 +19,6 @@ const MAX_MINI_PANELS = LOGMAP_CONFIG.maxMiniPanels;
 let todayDateStr = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
 
 
-
 /* ===== Clock ===== */
 function updateClock() {
     const now = new Date();
@@ -46,13 +45,11 @@ function updateClock() {
 }
 
 function handleMidnightRollover() {
-    // Remove all dot entries (keep mini-panels for ongoing session if any)
     const dotsToRemove = qsoEntries.filter(e => e.isDot);
     dotsToRemove.forEach(entry => {
         entry.marker.setMap(null);
         if (entry.infoWindow) entry.infoWindow.close();
     });
-    // Remove dots from array
     for (let i = qsoEntries.length - 1; i >= 0; i--) {
         if (qsoEntries[i].isDot) {
             qsoEntries.splice(i, 1);
@@ -112,12 +109,80 @@ function initMap() {
     });
     document.getElementById('btn-reset-zoom').addEventListener('click', resetZoom);
 
+    // ---- DEBUG marker for z-order investigation ----
+    addDebugMarker();
+
     // Initialize SocketIO after map is ready
     initSocketIO();
 
     // Start clock
     updateClock();
     setInterval(updateClock, 1000);
+}
+
+
+/* ===== Debug Marker ===== */
+function addDebugMarker() {
+    // Place a debug pin slightly offset from the station
+    const pos = {
+        lat: LOGMAP_CONFIG.stationLat + 0.3,
+        lng: LOGMAP_CONFIG.stationLon + 0.3,
+    };
+
+    const debugMarker = new google.maps.Marker({
+        position: pos,
+        map: map,
+        icon: {
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 10,
+            fillColor: '#ff00ff',
+            fillOpacity: 1,
+            strokeColor: '#ffffff',
+            strokeWeight: 3,
+        },
+        title: 'DEBUG',
+        zIndex: 500,
+    });
+
+    const debugIw = new google.maps.InfoWindow({
+        content: '<div style="background:#ff00ff;color:#fff;padding:10px 16px;border-radius:6px;font-weight:bold;font-size:18px;">デバッグ</div>',
+        disableAutoPan: true,
+    });
+    debugIw.open(map, debugMarker);
+
+    debugMarker.addListener('click', () => {
+        console.log('=== DEBUG MARKER CLICKED ===');
+
+        // Find the debug InfoWindow's DOM
+        // Walk up from the content div
+        const allIwContainers = document.querySelectorAll('.gm-style-iw-a');
+        console.log('Total .gm-style-iw-a elements:', allIwContainers.length);
+
+        allIwContainers.forEach((el, i) => {
+            console.log(`  [${i}] textContent: "${el.textContent.trim().substring(0, 30)}"`,
+                'zIndex:', el.style.zIndex,
+                'parent.zIndex:', el.parentElement ? el.parentElement.style.zIndex : 'N/A',
+                'parent.parent.zIndex:', (el.parentElement && el.parentElement.parentElement) ? el.parentElement.parentElement.style.zIndex : 'N/A');
+
+            // Walk up 5 levels and log each
+            let node = el;
+            for (let level = 0; level < 8 && node; level++) {
+                const tag = node.tagName || '?';
+                const pos = node.style ? node.style.position : '';
+                const z = node.style ? node.style.zIndex : '';
+                const cls = node.className || '';
+                console.log(`    L${level}: <${tag}> pos="${pos}" z="${z}" class="${cls}"`);
+                node = node.parentElement;
+            }
+        });
+
+        // Also check for .gm-style > div structure
+        const gmDivs = document.querySelectorAll('.gm-style > div > div > div[style*="z-index"]');
+        console.log('gm-style divs with z-index:', gmDivs.length);
+        gmDivs.forEach((el, i) => {
+            console.log(`  gm[${i}] z=${el.style.zIndex} children=${el.children.length}`);
+        });
+    });
 }
 
 
@@ -152,9 +217,7 @@ function initSocketIO() {
     });
 
     socket.on('initial_qsos', (qsos) => {
-        // Clear existing
         clearAllMarkers();
-        // Add all QSOs
         qsos.forEach((qso, index) => {
             const isLatest = (index === qsos.length - 1);
             addQsoToMap(qso, isLatest);
@@ -164,13 +227,9 @@ function initSocketIO() {
     });
 
     socket.on('new_qso', (qso) => {
-        // Shrink previous active mini-panel
         shrinkActivePanels();
-        // Add new QSO
         addQsoToMap(qso, true);
-        // Manage overflow
         enforceMaxPanels();
-        // Update zoom
         resetZoom();
     });
 
@@ -187,7 +246,6 @@ function initSocketIO() {
 
 /* ===== QSO Map Management ===== */
 function jitterPosition(lat, lng) {
-    // Check if another QSO already exists at (nearly) the same location
     const threshold = 0.002; // ~200m
     const overlap = qsoEntries.some(e => {
         const pos = e.marker.getPosition();
@@ -204,15 +262,12 @@ function jitterPosition(lat, lng) {
 function addQsoToMap(qso, isActive) {
     const position = jitterPosition(qso.latitude, qso.longitude);
 
-    // Active card always gets the highest z-index
-    const zIdx = isActive ? ++nextZIndex : 500;
-
     // Create marker
     const marker = new google.maps.Marker({
         position: position,
         map: map,
         icon: getMarkerIcon(isActive),
-        zIndex: zIdx,
+        zIndex: isActive ? 999 : 500,
     });
 
     if (isActive) {
@@ -227,7 +282,7 @@ function addQsoToMap(qso, isActive) {
         pixelOffset: new google.maps.Size(0, -5),
     });
 
-    // Store entry (must be created before opening InfoWindow)
+    // Store entry
     const entry = {
         marker: marker,
         infoWindow: infoWindow,
@@ -240,13 +295,11 @@ function addQsoToMap(qso, isActive) {
 
     if (isActive) {
         infoWindow.open(map, marker);
-        bringInfoWindowToFront(entry);
     }
 
-    // Click to toggle info window (for dots: restore card, re-click: back to dot)
+    // Click to toggle info window
     marker.addListener('click', () => {
         if (entry._infoOpen) {
-            // Close the card; if it was a dot, return to dot appearance
             infoWindow.close();
             entry._infoOpen = false;
             if (entry.isDot) {
@@ -254,13 +307,11 @@ function addQsoToMap(qso, isActive) {
                 marker.setZIndex(100);
             }
         } else {
-            // Show the card; if it's a dot, temporarily show full card
             if (entry.isDot) {
                 infoWindow.setContent(createMiniPanelHtml(entry.qso, false));
                 marker.setIcon(getMarkerIcon(false));
             }
             infoWindow.open(map, marker);
-            bringInfoWindowToFront(entry);
             entry._infoOpen = true;
         }
     });
@@ -280,18 +331,6 @@ function createMiniPanelHtml(qso, isActive) {
             </div>
         </div>
     `;
-}
-
-function bringInfoWindowToFront(targetEntry) {
-    // Close and reopen ALL open InfoWindows, with the target last.
-    // Google Maps renders the last-opened InfoWindow on top.
-    const others = qsoEntries.filter(e => e._infoOpen && e !== targetEntry);
-    others.forEach(e => {
-        e.infoWindow.close();
-        e.infoWindow.open(map, e.marker);
-    });
-    targetEntry.infoWindow.close();
-    targetEntry.infoWindow.open(map, targetEntry.marker);
 }
 
 function getMarkerIcon(isActive) {
@@ -330,22 +369,18 @@ function shrinkActivePanels() {
     qsoEntries.forEach(entry => {
         if (entry.isActive && !entry.isDot) {
             entry.isActive = false;
-            // Update marker icon to smaller
             entry.marker.setIcon(getMarkerIcon(false));
             entry.marker.setZIndex(500);
-            // Update info window content to past style
             entry.infoWindow.setContent(createMiniPanelHtml(entry.qso, false));
         }
     });
 }
 
 function enforceMaxPanels() {
-    // Count non-dot entries
     const panelEntries = qsoEntries.filter(e => !e.isDot);
     const excess = panelEntries.length - MAX_MINI_PANELS;
 
     if (excess > 0) {
-        // Convert oldest panels to dots
         for (let i = 0; i < excess; i++) {
             const entry = panelEntries[i];
             entry.isDot = true;
@@ -372,13 +407,11 @@ function resetZoom() {
     if (!map) return;
 
     const bounds = new google.maps.LatLngBounds();
-    // Always include station
     bounds.extend({
         lat: LOGMAP_CONFIG.stationLat,
         lng: LOGMAP_CONFIG.stationLon,
     });
 
-    // Include all visible markers
     qsoEntries.forEach(entry => {
         bounds.extend(entry.marker.getPosition());
     });
@@ -429,17 +462,14 @@ function getTranslation(key) {
 }
 
 function applyTranslations() {
-    // Update all elements with data-i18n attribute
     document.querySelectorAll('[data-i18n]').forEach(el => {
         const key = el.getAttribute('data-i18n');
         el.textContent = getTranslation(key);
     });
-    // Update title attributes
     document.querySelectorAll('[data-i18n-title]').forEach(el => {
         const key = el.getAttribute('data-i18n-title');
         el.title = getTranslation(key);
     });
-    // Update page title
     document.title = getTranslation('app_title');
 }
 
@@ -448,10 +478,8 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.lang-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             const lang = btn.getAttribute('data-lang');
-            // Update active state
             document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-            // Notify server
             if (socket && socket.connected) {
                 socket.emit('change_language', { lang: lang });
             }
