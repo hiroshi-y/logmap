@@ -281,6 +281,10 @@ function addQsoToMap(qso, isActive, showCard) {
             }
             if (el && el.parentElement) {
                 entry._iwL6 = el.parentElement;
+                // Let clicks pass through the invisible L6 wrapper to cards below;
+                // re-enable on the visible InfoWindow container (.gm-style-iw-a).
+                entry._iwL6.style.pointerEvents = 'none';
+                el.style.pointerEvents = 'auto';
             }
             panelEl.style.cursor = 'pointer';
             panelEl.onclick = () => bringToFront(entry);
