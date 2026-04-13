@@ -138,7 +138,7 @@ class LocationResolver:
         entity = self._cty.lookup(callsign)
         if entity:
             country = entity.name
-        city_name = f"Grid {grid_square.upper()}"
+        city_name = country or f"Grid {grid_square.upper()}"
         return ResolvedLocation(
             latitude=lat,
             longitude=lon,
