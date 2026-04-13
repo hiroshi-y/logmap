@@ -94,39 +94,35 @@ function initMap() {
 
 
 /* ===== InfoWindow z-order ===== */
-// Google Maps manages InfoWindow stacking via a wrapper div (L6) whose
-// z-index it reassigns on every render cycle (open, drag, zoom).
-// L6 = document.querySelector('.gm-style-iw-a').parentElement
-//
-// For the active (yellow) card, a MutationObserver overrides Google's
-// z-index with ACTIVE_ZINDEX whenever it changes.
-// For other cards, bringToFront sets an incrementing z-index on click.
+// Google Maps reassigns L6 z-index on every render cycle (open, drag, zoom).
+// A MutationObserver per card enforces our desired z-index.
 
 const ACTIVE_ZINDEX = 99999;
 let nextIwZIndex = 10000;
 
-function bringToFront(entry) {
-    if (entry._iwL6) {
-        entry._iwL6.style.zIndex = String(++nextIwZIndex);
-    }
-}
-
-function startActiveZIndexGuard(entry) {
-    if (!entry._iwL6 || entry._zObserver) return;
-    entry._iwL6.style.zIndex = String(ACTIVE_ZINDEX);
+function setZIndexGuard(entry, zIndex) {
+    if (!entry._iwL6) return;
+    entry._guardedZ = zIndex;
+    entry._iwL6.style.zIndex = String(zIndex);
+    if (entry._zObserver) return;
     entry._zObserver = new MutationObserver(() => {
-        if (parseInt(entry._iwL6.style.zIndex) !== ACTIVE_ZINDEX) {
-            entry._iwL6.style.zIndex = String(ACTIVE_ZINDEX);
+        if (entry._guardedZ != null && parseInt(entry._iwL6.style.zIndex) !== entry._guardedZ) {
+            entry._iwL6.style.zIndex = String(entry._guardedZ);
         }
     });
     entry._zObserver.observe(entry._iwL6, { attributes: true, attributeFilter: ['style'] });
 }
 
-function stopActiveZIndexGuard(entry) {
+function clearZIndexGuard(entry) {
     if (entry._zObserver) {
         entry._zObserver.disconnect();
         entry._zObserver = null;
     }
+    entry._guardedZ = null;
+}
+
+function bringToFront(entry) {
+    setZIndexGuard(entry, ++nextIwZIndex);
 }
 
 
@@ -267,6 +263,7 @@ function addQsoToMap(qso, isActive, showCard) {
         _userOpened: false,
         _panelId: panelId,
         _iwL6: null,
+        _guardedZ: null,
         _zObserver: null,
     };
     qsoEntries.push(entry);
@@ -275,8 +272,6 @@ function addQsoToMap(qso, isActive, showCard) {
         infoWindow.open(map, marker);
     }
 
-    // On domready: cache the L6 wrapper, attach click handler,
-    // and start the z-index guard for the active card.
     google.maps.event.addListener(infoWindow, 'domready', () => {
         const panelEl = document.getElementById(entry._panelId);
         if (panelEl) {
@@ -291,12 +286,17 @@ function addQsoToMap(qso, isActive, showCard) {
             panelEl.onclick = () => bringToFront(entry);
         }
         if (entry.isActive) {
-            startActiveZIndexGuard(entry);
+            setZIndexGuard(entry, ACTIVE_ZINDEX);
+        } else if (entry._guardedZ != null) {
+            setZIndexGuard(entry, entry._guardedZ);
+        } else {
+            setZIndexGuard(entry, ++nextIwZIndex);
         }
     });
 
     marker.addListener('click', () => {
         if (entry._infoOpen) {
+            clearZIndexGuard(entry);
             infoWindow.close();
             entry._infoOpen = false;
             entry._userOpened = false;
@@ -345,7 +345,7 @@ function shrinkActivePanels() {
     qsoEntries.forEach(entry => {
         if (entry.isActive && !entry.isDot) {
             entry.isActive = false;
-            stopActiveZIndexGuard(entry);
+            clearZIndexGuard(entry);
             entry.marker.setIcon(getMarkerIcon(false));
             entry.marker.setZIndex(500);
             entry.infoWindow.setContent(createMiniPanelHtml(entry.qso, false, entry._panelId));
@@ -358,6 +358,7 @@ function enforceMaxPanels() {
     const excess = autoOpen.length - Math.max(0, MAX_OPEN_CARDS - 1);
     for (let i = 0; i < excess; i++) {
         const entry = autoOpen[i];
+        clearZIndexGuard(entry);
         entry.isDot = true;
         entry.isActive = false;
         entry._infoOpen = false;
@@ -369,7 +370,7 @@ function enforceMaxPanels() {
 
 function clearAllMarkers() {
     qsoEntries.forEach(entry => {
-        stopActiveZIndexGuard(entry);
+        clearZIndexGuard(entry);
         entry.marker.setMap(null);
         entry.infoWindow.close();
     });
