@@ -6,7 +6,7 @@ from dataclasses import asdict
 
 import yaml
 from flask import Flask, render_template, jsonify, request
-from flask_socketio import SocketIO
+from flask_socketio import SocketIO, emit
 
 from .i18n import set_language, get_all_translations, get_current_language
 from .services.cty_parser import CtyDat
@@ -197,10 +197,9 @@ def register_socket_events() -> None:
     def handle_connect():
         logger.info("Client connected")
         if monitor:
-            # Send initial data
             qsos = monitor.get_today_qsos()
-            socketio.emit("initial_qsos", [asdict(q) for q in qsos])
-            socketio.emit("stats_update", monitor.get_stats())
+            emit("initial_qsos", [asdict(q) for q in qsos])
+            emit("stats_update", monitor.get_stats())
 
     @socketio.on("disconnect")
     def handle_disconnect():

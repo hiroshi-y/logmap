@@ -12,7 +12,7 @@ let translations = LOGMAP_CONFIG.translations;
 let stationMarker;
 
 const qsoEntries = [];
-const MAX_MINI_PANELS = LOGMAP_CONFIG.maxMiniPanels;
+const MAX_OPEN_CARDS = LOGMAP_CONFIG.openCards || 1;
 
 let todayDateStr = new Date().toLocaleDateString('en-CA');
 
@@ -179,7 +179,12 @@ function getMapDarkStyle() {
 
 /* ===== SocketIO ===== */
 function initSocketIO() {
-    socket = io();
+    socket = io({
+        reconnection: true,
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 30000,
+    });
 
     socket.on('connect', () => setStatus('status.connected'));
     socket.on('disconnect', () => setStatus('status.disconnected'));
@@ -259,6 +264,7 @@ function addQsoToMap(qso, isActive, showCard) {
         isDot: false,
         isActive: isActive,
         _infoOpen: showCard,
+        _userOpened: false,
         _panelId: panelId,
         _iwL6: null,
         _zObserver: null,
@@ -293,6 +299,7 @@ function addQsoToMap(qso, isActive, showCard) {
         if (entry._infoOpen) {
             infoWindow.close();
             entry._infoOpen = false;
+            entry._userOpened = false;
             if (entry.isDot) {
                 marker.setIcon(getDotIcon());
                 marker.setZIndex(100);
@@ -304,6 +311,7 @@ function addQsoToMap(qso, isActive, showCard) {
             }
             infoWindow.open(map, marker);
             entry._infoOpen = true;
+            entry._userOpened = true;
         }
     });
 }
@@ -346,10 +354,10 @@ function shrinkActivePanels() {
 }
 
 function enforceMaxPanels() {
-    const panelEntries = qsoEntries.filter(e => !e.isDot);
-    const excess = panelEntries.length - MAX_MINI_PANELS;
+    const autoOpen = qsoEntries.filter(e => e._infoOpen && !e._userOpened && !e.isActive);
+    const excess = autoOpen.length - Math.max(0, MAX_OPEN_CARDS - 1);
     for (let i = 0; i < excess; i++) {
-        const entry = panelEntries[i];
+        const entry = autoOpen[i];
         entry.isDot = true;
         entry.isActive = false;
         entry._infoOpen = false;

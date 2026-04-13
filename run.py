@@ -31,6 +31,8 @@ ctypes.WinDLL("kernel32").SetConsoleCtrlHandler(_ctrl_handler, True)
 
 
 def main():
+    if "-?" in sys.argv:
+        sys.argv = [("-h" if a == "-?" else a) for a in sys.argv]
     parser = argparse.ArgumentParser(description="LogMap amateur radio dashboard")
     parser.add_argument(
         "-c", "--config",
