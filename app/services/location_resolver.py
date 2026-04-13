@@ -1,11 +1,13 @@
 """Location resolver - determines coordinates and city name for a QSO.
 
 Resolution order:
-1. Grid square from FT8/other digital modes (4 or 6 char Maidenhead).
-   Most precise; avoids placing foreign stations in Asia when HAMLOG's
-   CODE field contains a value that matches a Japanese location.
-2. Hamlog.mst CODE lookup (Japanese city names for domestic QSOs).
+1. JCC code via Hamlog.mst / JCC table (Japanese stations only).
+2. Grid square from FT8/other digital modes (4 or 6 char Maidenhead).
 3. cty.dat prefix match (country-level fallback).
+
+JCC/MST is skipped for non-Japanese callsigns because HAMLOG's CODE field
+may contain a DXCC entity number that accidentally matches a Japanese MST
+entry, causing foreign stations to be placed in Japan.
 """
 
 import logging
@@ -61,16 +63,24 @@ class LocationResolver:
         2. Hamlog.mst / JCC code (Japanese city names for domestic QSOs)
         3. cty.dat prefix match (country-level fallback)
         """
-        if grid_square and len(grid_square) >= 4:
-            result = self._resolve_grid(callsign, grid_square)
-            if result:
-                return result
-
+        # JCC/MST codes are only meaningful for Japanese stations.
+        # Foreign stations may have a DXCC entity number in HAMLOG's CODE
+        # field that accidentally matches a Japanese MST entry.
+        is_ja = False
         if jcc_code:
+            entity = self._cty.lookup(callsign)
+            is_ja = entity is not None and entity.name == "Japan"
+
+        if is_ja and jcc_code:
             result = self._resolve_mst(jcc_code)
             if result:
                 return result
             result = self._resolve_jcc(jcc_code)
+            if result:
+                return result
+
+        if grid_square and len(grid_square) >= 4:
+            result = self._resolve_grid(callsign, grid_square)
             if result:
                 return result
 
