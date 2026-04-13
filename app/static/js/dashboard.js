@@ -122,7 +122,8 @@ function clearZIndexGuard(entry) {
 }
 
 function bringToFront(entry) {
-    setZIndexGuard(entry, ++nextIwZIndex);
+    nextIwZIndex = Math.max(nextIwZIndex, ACTIVE_ZINDEX) + 1;
+    setZIndexGuard(entry, nextIwZIndex);
 }
 
 
@@ -281,10 +282,15 @@ function addQsoToMap(qso, isActive, showCard) {
             }
             if (el && el.parentElement) {
                 entry._iwL6 = el.parentElement;
-                // Let clicks pass through the invisible L6 wrapper to cards below;
-                // re-enable on the visible InfoWindow container (.gm-style-iw-a).
+                // .gm-style-iw-a and .gm-style-iw-t are 9999px wide invisible wrappers.
+                // Disable pointer events on them so clicks pass through to cards below,
+                // then re-enable only on .gm-style-iw-c (the actual visible card).
                 entry._iwL6.style.pointerEvents = 'none';
-                el.style.pointerEvents = 'auto';
+                el.style.pointerEvents = 'none';
+                const iwT = el.querySelector('.gm-style-iw-t');
+                if (iwT) iwT.style.pointerEvents = 'none';
+                const iwC = el.querySelector('.gm-style-iw-c');
+                if (iwC) iwC.style.pointerEvents = 'auto';
             }
             panelEl.style.cursor = 'pointer';
             panelEl.onclick = () => bringToFront(entry);
