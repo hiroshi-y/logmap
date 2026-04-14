@@ -56,12 +56,19 @@ def main():
         default=None,
         help="number of latest QSO cards to show open (default: 1)",
     )
+    parser.add_argument(
+        "-o", "--overwrite",
+        action="store_true",
+        help="write QRZ-resolved grid squares back to Hamlog.hdb. "
+             "Without this flag, resolved grids are appended to gridsupl.log (CSV).",
+    )
     args = parser.parse_args()
 
     app = create_app(
         config_path=args.config,
         grid_square=args.grid,
         open_cards=args.open_cards,
+        overwrite_grid=args.overwrite,
     )
 
     with open(args.config, "r", encoding="utf-8") as f:

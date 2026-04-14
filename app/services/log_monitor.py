@@ -3,6 +3,8 @@
 Polls the .hdb file for new records and emits events via callback.
 """
 
+import csv
+import datetime as _dt
 import logging
 import threading
 import time
@@ -10,9 +12,29 @@ from dataclasses import dataclass
 from typing import Callable
 
 from .hamlog_reader import HamlogReader, HamlogQso
+from .hamlog_writer import HamlogWriter
 from .location_resolver import LocationResolver, ResolvedLocation
 
 logger = logging.getLogger(__name__)
+
+
+def _to_utc(date_str: str, time_str: str, is_utc: bool) -> tuple[str, str]:
+    """Return (YYYY/MM/DD, HH:MM) normalised to UTC.
+
+    HAMLOG stores each QSO's time in either JST or UTC (flagged by the high
+    bit of the minute byte).  Digital-mode QSOs logged by WSJT-X are UTC; CW
+    / phone QSOs are commonly JST.  We always write UTC to gridsupl.log.
+    """
+    if not date_str or not time_str:
+        return (date_str, time_str)
+    if is_utc:
+        return (date_str, time_str)
+    try:
+        dt = _dt.datetime.strptime(f"{date_str} {time_str}", "%Y/%m/%d %H:%M")
+    except ValueError:
+        return (date_str, time_str)
+    dt -= _dt.timedelta(hours=9)  # JST -> UTC
+    return (dt.strftime("%Y/%m/%d"), dt.strftime("%H:%M"))
 
 
 @dataclass
@@ -39,7 +61,9 @@ class LogMonitor:
 
     def __init__(self, reader: HamlogReader, resolver: LocationResolver,
                  poll_interval: float = 3.0,
-                 on_new_qso=None):
+                 on_new_qso=None,
+                 writer: HamlogWriter | None = None,
+                 grid_log_path: str | None = None):
         """
         Args:
             reader: HamlogReader instance.
@@ -49,6 +73,8 @@ class LogMonitor:
         """
         self._reader = reader
         self._resolver = resolver
+        self._writer = writer
+        self._grid_log_path = grid_log_path
         self._poll_interval = poll_interval
         self._on_new_qso = on_new_qso
         self._last_count = 0
@@ -156,6 +182,23 @@ class LogMonitor:
             logger.warning("Could not resolve location for %s", rec.callsign)
             return None
 
+        # If the resolver fetched a grid from QRZ to fill a gap, either
+        # persist it back to the HAMLOG database (when -o was given) or
+        # append a CSV line to gridsupl.log for offline review.
+        grid_square = rec.gl
+        if location.filled_grid_square:
+            if self._writer and rec.record_index >= 0:
+                if self._writer.update_grid(rec.record_index, location.filled_grid_square):
+                    grid_square = location.filled_grid_square
+                    logger.info(
+                        "Back-filled grid for %s (%s %s): %s",
+                        rec.callsign, rec.date, rec.time_on,
+                        location.filled_grid_square,
+                    )
+            elif self._grid_log_path:
+                self._append_gridsupl(rec, location.filled_grid_square)
+                grid_square = location.filled_grid_square
+
         return QsoEvent(
             callsign=rec.callsign,
             date=rec.date,
@@ -170,8 +213,28 @@ class LogMonitor:
             distance_km=location.distance_km,
             resolve_method=location.method,
             jcc_code=rec.jcc_code,
-            grid_square=rec.gl,
+            grid_square=grid_square,
         )
+
+    def _append_gridsupl(self, rec: HamlogQso, grid: str) -> None:
+        """Append one CSV row to gridsupl.log (date_utc, time_utc, callsign, grid).
+
+        The file is opened, written, flushed, and closed on every call so an
+        unexpected exit cannot lose the entry.  Times stored as JST in HAMLOG
+        are converted to UTC (offset -9h).
+        """
+        date_utc, time_utc = _to_utc(rec.date, rec.time_on, rec.utc)
+        try:
+            with open(self._grid_log_path, "a", newline="", encoding="utf-8") as fp:
+                writer = csv.writer(fp)
+                writer.writerow([date_utc, time_utc, rec.callsign, grid.upper()])
+                fp.flush()
+            logger.info(
+                "Grid supplement logged: %s %sZ %s %s",
+                date_utc, time_utc, rec.callsign, grid,
+            )
+        except OSError as e:
+            logger.error("Failed to append to %s: %s", self._grid_log_path, e)
 
     def _update_stats(self) -> None:
         """Update cumulative statistics."""

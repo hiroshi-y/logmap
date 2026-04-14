@@ -141,6 +141,7 @@ class HamlogQso:
     jcc_code: str
     gl: str             # grid locator
     frequency: str      # raw frequency text (e.g. "7.075")
+    record_index: int = -1  # 0-based index in the .hdb file
 
     @property
     def datetime_str(self) -> str:
@@ -296,6 +297,12 @@ class HamlogReader:
             )
             return False
 
+    def get_layout(self) -> tuple[int, int, list[tuple[str, int, int]]] | None:
+        """Return (header_len, record_size, fields) after ensuring header loaded."""
+        if not self._load_header():
+            return None
+        return (self._header_len, self._record_size, list(self._fields))
+
     def _field(self, name: str) -> tuple[int, int] | None:
         for fname, off, flen in self._fields:
             if fname == name:
@@ -328,7 +335,7 @@ class HamlogReader:
             return None
         if len(data) < self._record_size:
             return None
-        return self._parse_record(data)
+        return self._parse_record(data, index)
 
     def read_last_n_records(self, n: int) -> list[HamlogQso]:
         total = self.get_record_count()
@@ -362,7 +369,8 @@ class HamlogReader:
             data = block[i:i + rsize]
             if len(data) < rsize:
                 break
-            qso = self._parse_record(data)
+            idx = start + (i // rsize)
+            qso = self._parse_record(data, idx)
             if qso:
                 records.append(qso)
         return records
@@ -374,7 +382,7 @@ class HamlogReader:
         off, flen = loc
         return data[off:off + flen]
 
-    def _parse_record(self, data: bytes) -> HamlogQso | None:
+    def _parse_record(self, data: bytes, index: int = -1) -> HamlogQso | None:
         # Skip deleted records
         if not data or data[0] != DELETE_MARK_ACTIVE:
             return None
@@ -412,4 +420,5 @@ class HamlogReader:
             jcc_code=_decode_ascii(self._get(data, "CODE")),
             gl=_decode_ascii(self._get(data, "GL")),
             frequency=freq_text,
+            record_index=index,
         )

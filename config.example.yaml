@@ -1,0 +1,65 @@
+# LogMap Configuration (example)
+# Copy to config.yaml and fill in real values. config.yaml is gitignored.
+
+# Google Maps API
+google_maps:
+  api_key: "YOUR_GOOGLE_MAPS_API_KEY"
+
+# Operator station
+station:
+  callsign: "YOUR_CALLSIGN"
+  # QTH grid square can be overridden with -g CLI option (default: PM95UQ)
+  grid_square: "PM95UQ"
+
+# Turbo HAMLOG settings
+hamlog:
+  # Path to the Turbo HAMLOG data directory
+  data_dir: 'C:\Hamlog'
+  # Main database file name
+  db_file: "Hamlog.hdb"
+  # Master file (CODE -> QTH/lat/lon). Authoritative for HAMLOG CODEs.
+  mst_file: "Hamlog.mst"
+  # Polling interval in seconds
+  poll_interval: 3
+
+# cty.dat settings
+cty_dat:
+  # Path to cty.dat file. If not found, will attempt download.
+  file_path: "data/cty.dat"
+  # Download URL for cty.dat updates
+  download_url: "https://www.country-files.com/bigcty/cty.dat"
+
+# JCC code data
+jcc:
+  file_path: "data/jcc_codes.json"
+
+# Dashboard settings
+dashboard:
+  # How many past QSOs to preload on startup
+  initial_qso_count: 100
+  # How many latest QSO cards to show open
+  open_cards: 1
+  # Maximum number of mini-panels before converting to dots
+  max_mini_panels: 20
+  # Language: "ja" or "en"
+  language: "ja"
+  # Web server port
+  port: 5000
+  # Web server host
+  host: "0.0.0.0"
+
+# QRZ.com XML Logbook Data API
+# Used to fill missing grid squares for FT8/digital QSOs (foreign stations only).
+# Resolved grids are written back to the HAMLOG database (GL field) when
+# run.py is invoked with -o; otherwise appended to gridsupl.log.
+# Requires a QRZ.com XML subscription. Leave enabled=false to disable.
+qrz:
+  enabled: false
+  username: ""
+  password: ""
+  timeout: 5.0
+
+# Logging
+logging:
+  level: "INFO"
+  file: "logmap.log"

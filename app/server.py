@@ -15,7 +15,9 @@ from .services.jcc_resolver import JccResolver
 from .services.location_resolver import LocationResolver
 from .services.hamlog_mst import HamlogMst
 from .services.hamlog_reader import HamlogReader
+from .services.hamlog_writer import HamlogWriter
 from .services.log_monitor import LogMonitor, QsoEvent
+from .services.qrz_client import QrzClient
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +35,8 @@ def load_config(config_path: str) -> dict:
 
 def create_app(config_path: str = "config.yaml",
                grid_square: str | None = None,
-               open_cards: int | None = None) -> Flask:
+               open_cards: int | None = None,
+               overwrite_grid: bool = False) -> Flask:
     """Create and configure the Flask application."""
     global monitor, config
 
@@ -115,6 +118,17 @@ def create_app(config_path: str = "config.yaml",
     # Store open_cards setting
     config["_open_cards"] = open_cards if open_cards is not None else config.get("dashboard", {}).get("open_cards", 1)
 
+    # QRZ.com client (optional - fills missing grids for foreign stations)
+    qrz_cfg = config.get("qrz", {})
+    qrz_client: QrzClient | None = None
+    if qrz_cfg.get("enabled") and qrz_cfg.get("username") and qrz_cfg.get("password"):
+        qrz_client = QrzClient(
+            username=qrz_cfg["username"],
+            password=qrz_cfg["password"],
+            timeout=qrz_cfg.get("timeout", 5.0),
+        )
+        logger.info("QRZ.com grid lookup enabled for user %s", qrz_cfg["username"])
+
     # Location resolver
     resolver = LocationResolver(
         cty=cty,
@@ -122,7 +136,19 @@ def create_app(config_path: str = "config.yaml",
         station_lat=station_lat,
         station_lon=station_lon,
         mst=mst,
+        qrz=qrz_client,
     )
+
+    # HAMLOG writer (for QRZ grid back-fill).  Only enabled when the user
+    # explicitly opts in with -o/--overwrite; otherwise resolved grids are
+    # appended to gridsupl.log instead of touching the HAMLOG database.
+    writer = HamlogWriter(reader) if (qrz_client and overwrite_grid) else None
+    grid_log_path = None if overwrite_grid else os.path.join(base_dir, "gridsupl.log")
+    if qrz_client:
+        if overwrite_grid:
+            logger.info("QRZ grid back-fill: HAMLOG writeback enabled (-o)")
+        else:
+            logger.info("QRZ grid back-fill: append-only to %s", grid_log_path)
 
     # Log monitor
     def on_new_qso(event: QsoEvent):
@@ -135,6 +161,8 @@ def create_app(config_path: str = "config.yaml",
         resolver=resolver,
         poll_interval=hamlog_cfg.get("poll_interval", 3),
         on_new_qso=on_new_qso,
+        writer=writer,
+        grid_log_path=grid_log_path,
     )
 
     # Register routes

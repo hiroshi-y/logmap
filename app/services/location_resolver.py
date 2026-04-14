@@ -17,6 +17,7 @@ from .cty_parser import CtyDat
 from .geo_utils import grid_to_latlon, haversine_distance
 from .hamlog_mst import HamlogMst
 from .jcc_resolver import JccResolver
+from .qrz_client import QrzClient
 from .us_states import latlon_to_us_state
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,7 @@ class ResolvedLocation:
     country: str
     method: str  # "mst", "jcc", "grid", "cty"
     distance_km: float = 0.0
+    filled_grid_square: str = ""  # grid fetched via QRZ (needs writeback); empty otherwise
 
 
 class LocationResolver:
@@ -44,10 +46,12 @@ class LocationResolver:
         station_lat: float,
         station_lon: float,
         mst: HamlogMst | None = None,
+        qrz: QrzClient | None = None,
     ):
         self._cty = cty
         self._jcc = jcc
         self._mst = mst
+        self._qrz = qrz
         self._station_lat = station_lat
         self._station_lon = station_lon
 
@@ -84,6 +88,18 @@ class LocationResolver:
             result = self._resolve_grid(callsign, grid_square)
             if result:
                 return result
+
+        # No usable grid was supplied.  For non-Japanese stations, ask QRZ
+        # for the operator's registered grid before falling back to cty.dat.
+        # The returned grid is reported via filled_grid_square so the caller
+        # can write it back to the HAMLOG database.
+        if self._qrz and not is_ja:
+            qrz_grid = self._qrz.lookup_grid(callsign)
+            if qrz_grid and len(qrz_grid) >= 4:
+                result = self._resolve_grid(callsign, qrz_grid)
+                if result:
+                    result.filled_grid_square = qrz_grid
+                    return result
 
         result = self._resolve_cty(callsign)
         if result:
