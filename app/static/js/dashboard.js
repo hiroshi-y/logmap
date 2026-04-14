@@ -14,8 +14,6 @@ let stationMarker;
 const qsoEntries = [];
 const MAX_OPEN_CARDS = LOGMAP_CONFIG.openCards || 1;
 
-let todayDateStr = new Date().toLocaleDateString('en-CA');
-
 
 /* ===== Clock ===== */
 function updateClock() {
@@ -26,23 +24,6 @@ function updateClock() {
 
     document.getElementById('clock-utc-time').textContent =
         now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'UTC' });
-
-    const currentDate = now.toLocaleDateString('en-CA');
-    if (currentDate !== todayDateStr) {
-        todayDateStr = currentDate;
-        handleMidnightRollover();
-    }
-}
-
-function handleMidnightRollover() {
-    for (let i = qsoEntries.length - 1; i >= 0; i--) {
-        if (qsoEntries[i].isDot) {
-            qsoEntries[i].marker.setMap(null);
-            qsoEntries[i].infoWindow.close();
-            qsoEntries.splice(i, 1);
-        }
-    }
-    updateFarthestLines();
 }
 
 

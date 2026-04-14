@@ -7,7 +7,6 @@ import logging
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime, date
 from typing import Callable
 
 from .hamlog_reader import HamlogReader, HamlogQso
@@ -57,7 +56,6 @@ class LogMonitor:
         self._sleep_fn: Callable = time.sleep  # overridden when using eventlet
         self._thread = None
         self._today_qsos: list[QsoEvent] = []
-        self._today_date: date | None = None
         self._stats = {
             "total_qsos": 0,
             "farthest_call": "",
@@ -83,7 +81,6 @@ class LogMonitor:
 
         # Initialize with current record count
         self._last_count = self._reader.get_record_count()
-        self._today_date = date.today()
         self._stop_event.clear()
 
         if background_task_fn:
@@ -106,8 +103,7 @@ class LogMonitor:
         logger.info("Log monitor stopped.")
 
     def get_today_qsos(self) -> list[QsoEvent]:
-        """Get all QSOs processed today."""
-        self._check_date_rollover()
+        """Get all QSOs currently loaded."""
         return list(self._today_qsos)
 
     def get_stats(self) -> dict:
@@ -130,7 +126,6 @@ class LogMonitor:
         """Main polling loop - runs in background thread."""
         while not self._stop_event.is_set():
             try:
-                self._check_date_rollover()
                 current_count = self._reader.get_record_count()
 
                 if current_count > self._last_count:
@@ -149,20 +144,6 @@ class LogMonitor:
                 logger.error("Error in poll loop: %s", e)
 
             self._sleep_fn(self._poll_interval)
-
-    def _check_date_rollover(self) -> None:
-        """Clear data when crossing midnight (local time)."""
-        today = date.today()
-        if self._today_date and today != self._today_date:
-            logger.info("Date rollover: clearing today's QSOs")
-            self._today_qsos.clear()
-            self._stats = {
-                "total_qsos": 0,
-                "farthest_call": "",
-                "farthest_location": "",
-                "farthest_distance": 0.0,
-            }
-            self._today_date = today
 
     def _process_qso(self, rec: HamlogQso) -> QsoEvent | None:
         """Process a raw QSO record into a QsoEvent with location."""
