@@ -17,6 +17,7 @@ from .cty_parser import CtyDat
 from .geo_utils import grid_to_latlon, haversine_distance
 from .hamlog_mst import HamlogMst
 from .jcc_resolver import JccResolver
+from .us_states import latlon_to_us_state
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +139,12 @@ class LocationResolver:
         entity = self._cty.lookup(callsign)
         if entity:
             country = entity.name
-        city_name = country or f"Grid {grid_square.upper()}"
+        # For US stations, prepend the state code derived from lat/lon.
+        if country == "United States":
+            state = latlon_to_us_state(lat, lon)
+            city_name = f"{state}, {country}" if state else country
+        else:
+            city_name = country or f"Grid {grid_square.upper()}"
         return ResolvedLocation(
             latitude=lat,
             longitude=lon,
